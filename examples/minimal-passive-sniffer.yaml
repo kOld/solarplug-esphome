@@ -1,0 +1,49 @@
+substitutions:
+  name: solarplug-passive
+  friendly_name: Solar Plug Passive Sniffer
+
+packages:
+  solarplug_reader: !include ../packages/solarplug-passive-sniffer.yaml
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.2
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "SolarPlug Passive"
+    password: !secret ap_password
+
+captive_portal:
+
+uart:
+  id: uart_main
+  rx_pin: GPIO16
+  baud_rate: 2400
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+
+external_components:
+  - source: github://kOld/solarplug-esphome@main
+    components: [solarplug]
+    refresh: 1d

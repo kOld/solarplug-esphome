@@ -1,0 +1,108 @@
+commands:
+  HGEN:
+    policy: production
+    fields:
+      - {index: 0, name: date_ymd, unit: null, confidence: high, evidence: local_capture}
+      - {index: 1, name: time_hm, unit: null, confidence: high, evidence: local_capture}
+      - {index: 2, name: daily_power_gen_kwh, unit: kWh, confidence: high, evidence: solar_of_things_match_and_daily_reset}
+      - {index: 3, name: monthly_electricity_generation_kwh, unit: kWh, confidence: high, evidence: solar_of_things_match_and_monthly_reset}
+      - {index: 4, name: yearly_electricity_generation_kwh, unit: kWh, confidence: high, evidence: solar_of_things_match_month_continuity}
+      - {index: 5, name: total_power_generation_kwh, unit: kWh, confidence: high, evidence: solar_of_things_match_lifetime_continuity}
+  HBAT:
+    policy: production
+    fields:
+      - {index: 0, name: battery_type_code, unit: null, confidence: high, evidence: portal_match}
+      - {index: 1, name: battery_voltage_v, unit: V, confidence: high, evidence: live_match}
+      - {index: 2, name: battery_capacity_percent, unit: "%", confidence: high, evidence: live_match}
+      - {index: 3, name: battery_charging_current_a, unit: A, confidence: high, evidence: live_match}
+      - {index: 4, name: battery_discharge_current_a, unit: A, confidence: high, evidence: live_match}
+      - {index: 5, name: bus_voltage_v, unit: V, confidence: high, evidence: portal_match}
+  HOP:
+    policy: production
+    fields:
+      - {index: 0, name: ac_output_voltage_v, unit: V, confidence: high, evidence: portal_match}
+      - {index: 1, name: ac_output_frequency_hz, unit: Hz, confidence: high, evidence: portal_match}
+      - {index: 2, name: output_apparent_power_va, unit: VA, confidence: high, evidence: portal_match}
+      - {index: 3, name: output_active_power_w, unit: W, confidence: high, evidence: portal_match}
+      - {index: 4, name: output_load_percent, unit: "%", confidence: high, evidence: portal_match}
+  HGRID:
+    policy: production
+    fields:
+      - {index: 0, name: ac_input_voltage_v, unit: V, confidence: high, evidence: portal_match}
+      - {index: 1, name: mains_frequency_hz, unit: Hz, confidence: high, evidence: portal_match}
+      - {index: 6, name: mains_power_w, unit: W, confidence: high, evidence: portal_match}
+      - {index: 7, name: mains_current_flow_direction_code, unit: null, confidence: high, evidence: portal_match}
+  HPV:
+    policy: production
+    fields:
+      - {index: 0, name: pv_voltage_v, unit: V, confidence: high, evidence: active_replacement_daytime_recorder}
+      - {index: 1, name: pv_current_a, unit: A, confidence: high, evidence: active_replacement_daytime_recorder}
+      - {index: 2, name: pv_power_w, unit: W, confidence: high, evidence: active_replacement_daytime_recorder}
+      - {index: 3, name: generation_power_kw, unit: kW, confidence: low, evidence: active_replacement_daytime_recorder_zero_while_pv_power_nonzero}
+  HTEMP:
+    policy: production
+    fields:
+      - {index: 0, name: inverter_temperature_c, unit: C, confidence: high, evidence: portal_match}
+      - {index: 1, name: boost_temperature_c, unit: C, confidence: high, evidence: portal_match}
+      - {index: 2, name: transformer_temperature_c, unit: C, confidence: high, evidence: portal_match}
+      - {index: 3, name: pv_temperature_c, unit: C, confidence: high, evidence: portal_match}
+      - {index: 4, name: fan_1_speed_percent, unit: "%", confidence: high, evidence: portal_match}
+      - {index: 5, name: fan_2_speed_percent, unit: "%", confidence: high, evidence: portal_match}
+  HSTS:
+    policy: production
+    fields:
+      - {index: 0, name: status_code, unit: null, confidence: high, evidence: portal_match}
+      - {index: 1, name: mode_code, unit: null, confidence: high, evidence: portal_match}
+      - {index: 1, name: status_bits, unit: null, confidence: high, evidence: local_capture}
+      - {index: 2, name: fault_bits, unit: null, confidence: high, evidence: local_capture}
+  QPRTL:
+    policy: production
+    fields:
+      - {index: 0, name: device_type, unit: null, confidence: high, evidence: portal_match}
+  HIMSG1:
+    policy: production
+    fields:
+      - {index: 0, name: software_version, unit: null, confidence: high, evidence: portal_match}
+      - {index: 1, name: software_date, unit: null, confidence: high, evidence: local_capture}
+      - {index: 2, name: revision, unit: null, confidence: high, evidence: local_capture}
+  HBMS1:
+    policy: diagnostic
+    fields:
+      - {index: 0, name: bms_status_code, unit: null, confidence: medium, evidence: local_capture}
+      - {index: 1, name: bms_flags, unit: null, confidence: medium, evidence: local_capture}
+      - {index: 2, name: bms_discharge_voltage_limit_v, unit: V, confidence: medium, evidence: portal_match}
+      - {index: 3, name: bms_charge_voltage_limit_v, unit: V, confidence: medium, evidence: portal_match}
+      - {index: 4, name: bms_charge_current_limit_a, unit: A, confidence: medium, evidence: portal_match}
+      - {index: 5, name: bms_soc_percent, unit: "%", confidence: medium-high, evidence: independent_bms_match}
+      - {index: 6, name: bms_charging_current_a, unit: A, confidence: medium-high, evidence: independent_bms_match}
+      - {index: 7, name: bms_discharge_current_a, unit: A, confidence: medium-high, evidence: independent_bms_match}
+  HBMS2:
+    policy: diagnostic
+    fields:
+      - {index: 0, name: remaining_capacity, unit: Ah, confidence: low, evidence: zero_on_confirmed_setup}
+      - {index: 1, name: nominal_capacity, unit: Ah, confidence: low, evidence: zero_on_confirmed_setup}
+      - {index: 2, name: display_mode, unit: null, confidence: medium, evidence: local_capture}
+      - {index: 3, name: max_voltage, unit: mV, confidence: medium, evidence: independent_bms_match}
+      - {index: 4, name: max_voltage_cell_position, unit: cell, confidence: medium, evidence: local_capture}
+      - {index: 5, name: min_voltage, unit: mV, confidence: medium, evidence: independent_bms_match}
+      - {index: 6, name: min_voltage_cell_position, unit: cell, confidence: medium, evidence: local_capture}
+  HBMS3:
+    policy: diagnostic
+    fields:
+      - {index: 0, name: cell_voltage_list, unit: mV, confidence: low, evidence: zero_on_confirmed_setup}
+  HEEP1:
+    policy: diagnostic
+    fields:
+      - {index: 0, name: raw_payload, unit: null, confidence: low, evidence: packed_config_snapshot}
+  HEEP2:
+    policy: diagnostic
+    fields:
+      - {index: 0, name: raw_payload, unit: null, confidence: low, evidence: packed_config_snapshot}
+  HPVB:
+    policy: diagnostic
+    fields:
+      - {index: 0, name: pv_voltage_v, unit: V, confidence: medium, evidence: local_capture}
+      - {index: 1, name: pv_current_a, unit: A, confidence: medium, evidence: local_capture}
+      - {index: 2, name: pv_power_w, unit: W, confidence: medium, evidence: local_capture}
+      - {index: 3, name: pv_charging_mark_code, unit: null, confidence: medium, evidence: local_capture}
+      - {index: 4, name: bus_voltage_v, unit: V, confidence: medium, evidence: local_capture}

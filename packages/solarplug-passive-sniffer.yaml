@@ -1,0 +1,17 @@
+solarplug:
+  id: solarplug_reader
+  uart_id: uart_main
+  passive_mode: true
+  response_timeout_ms: 1500ms
+  text_sensors:
+    operating_mode:
+      name: Operating Mode
+    hsts_status_bits:
+      name: HSTS Status Bits
+      disabled_by_default: true
+    heep1_raw_payload:
+      name: HEEP1 Raw Payload
+      disabled_by_default: true
+    heep2_raw_payload:
+      name: HEEP2 Raw Payload
+      disabled_by_default: true

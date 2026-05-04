@@ -1,0 +1,73 @@
+solarplug:
+  id: solarplug_reader
+  enable_writes: true
+  write_profile: beta
+  raw_frame_logging: true
+  decoded_field_logging: true
+  text_sensors:
+    last_write_status:
+      name: Last Write Status
+      icon: mdi:playlist-check
+  switches:
+    buzzer: { name: Buzzer On, icon: mdi:bell-outline }
+    backlight: { name: Backlight On, icon: mdi:monitor-small }
+    display_return_homepage: { name: Display Returns Home, icon: mdi:home-import-outline }
+    over_temperature_restart: { name: Over Temperature Restart, icon: mdi:thermometer-alert }
+    overload_restart: { name: Overload Restart, icon: mdi:alert-outline }
+    input_source_detection_prompt_sound: { name: Input Source Prompt Sound, icon: mdi:volume-high }
+    battery_equalization_mode_enable: { name: Battery Equalization Mode Enable, icon: mdi:toggle-switch-outline }
+    bms_function_enable:
+      name: BMS Function Enable
+      icon: mdi:battery-sync
+      disabled_by_default: true
+  numbers:
+    battery_equalization_interval:
+      name: Battery Equalization Interval
+      icon: mdi:calendar-range
+    battery_equalization_timeout:
+      name: Battery Equalization Timeout
+      icon: mdi:timer-cog-outline
+    battery_equalization_time:
+      name: Battery Equalization Time
+      icon: mdi:timer-outline
+    battery_equalization_voltage:
+      name: Battery Equalization Voltage
+      icon: mdi:battery-sync
+    battery_recharge_voltage:
+      name: Battery Recharge Voltage
+      icon: mdi:battery-plus
+    battery_redischarge_voltage:
+      name: Battery Redischarge Voltage
+      icon: mdi:battery-minus
+    restore_second_output_battery_capacity:
+      name: Restore Second Output Battery Capacity
+      icon: mdi:battery-clock
+    restore_second_output_delay_time:
+      name: Restore Second Output Delay Time
+      icon: mdi:timer-outline
+    bms_lock_machine_battery_capacity:
+      name: BMS Lock Machine Battery Capacity
+      icon: mdi:battery-lock
+      disabled_by_default: true
+    grid_connected_current:
+      name: Grid Connected Current
+      icon: mdi:current-ac
+    maximum_mains_charging_current:
+      name: Maximum Mains Charging Current
+      icon: mdi:current-ac
+    maximum_charging_current:
+      name: Maximum Charging Current
+      icon: mdi:battery-charging
+  selects:
+    battery_type:
+      name: Battery Type
+      disabled_by_default: true
+    charger_priority:
+      name: Charger Priority
+      disabled_by_default: true
+    output_source_priority:
+      name: Output Source Priority
+      disabled_by_default: true
+    pv_energy_feeding_priority:
+      name: PV Energy Feeding Priority
+      disabled_by_default: true

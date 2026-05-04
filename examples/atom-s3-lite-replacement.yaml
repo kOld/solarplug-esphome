@@ -1,0 +1,129 @@
+substitutions:
+  name: solarplug-atom-s3
+  friendly_name: Solar Plug Atom S3
+  uart_tx_pin: GPIO6
+  uart_rx_pin: GPIO5
+
+packages:
+  solarplug_reader: !include ../packages/solarplug-read-full.yaml
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  comment: Atom S3 Lite read-only Solar Plug-RWB1 replacement for HPVINV02-style inverters.
+  min_version: 2026.1.2
+  project:
+    name: solarplug.esphome
+    version: "0.1.0"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+  baud_rate: "0"
+
+api:
+  encryption:
+    key: !secret api_key
+  reboot_timeout: 0min
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "SolarPlug Atom S3"
+    password: !secret ap_password
+  reboot_timeout: 0min
+
+captive_portal:
+
+web_server:
+  version: 3
+  include_internal: false
+  auth:
+    username: admin
+    password: !secret ap_password
+  sorting_groups:
+    - id: identity_group
+      name: Identity
+      sorting_weight: 10
+    - id: live_group
+      name: Live Metrics
+      sorting_weight: 20
+    - id: energy_group
+      name: Energy
+      sorting_weight: 30
+    - id: battery_group
+      name: Battery
+      sorting_weight: 40
+    - id: bms_group
+      name: BMS Diagnostics
+      sorting_weight: 50
+    - id: diagnostics_group
+      name: Device Diagnostics
+      sorting_weight: 90
+
+uart:
+  id: uart_main
+  tx_pin: ${uart_tx_pin}
+  rx_pin: ${uart_rx_pin}
+  baud_rate: 2400
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+
+external_components:
+  - source: github://kOld/solarplug-esphome@main
+    components: [solarplug]
+    refresh: 1d
+
+button:
+  - platform: restart
+    name: Restart Solar Plug Reader
+    icon: mdi:restart
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: diagnostics_group
+      sorting_weight: 30
+
+binary_sensor:
+  - platform: status
+    name: Node Online
+    icon: mdi:lan-connect
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: diagnostics_group
+      sorting_weight: 32
+
+sensor:
+  - platform: wifi_signal
+    name: WiFi Signal
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: diagnostics_group
+      sorting_weight: 200
+  - platform: uptime
+    name: Uptime
+    type: seconds
+    update_interval: 60s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: diagnostics_group
+      sorting_weight: 210
+
+text_sensor:
+  - platform: version
+    name: ESPHome Version
+    icon: mdi:chip
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: diagnostics_group
+      sorting_weight: 4

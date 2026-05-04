@@ -1,0 +1,25 @@
+solarplug:
+  id: solarplug_reader
+  uart_id: uart_main
+  passive_mode: false
+  boot_poll_delay: 10s
+  fast_poll_interval: 20s
+  energy_poll_interval: 60s
+  identity_poll_interval: 30min
+  sensors:
+    ac_input_voltage: { name: AC Input Voltage }
+    mains_frequency: { name: Mains Frequency }
+    mains_power: { name: Mains Power }
+    output_active_power: { name: Output Active Power }
+    output_load: { name: Output Load }
+    pv_power: { name: PV Power }
+    battery_voltage: { name: Battery Voltage }
+    battery_capacity: { name: Battery Capacity }
+    total_power_generation: { name: Total Power Generation }
+  text_sensors:
+    operating_mode: { name: Operating Mode }
+    device_type: { name: Device Type }
+    software_version: { name: Software Version }
+  buttons:
+    refresh_fast: { name: Refresh Fast Poll }
+    refresh_energy: { name: Refresh Energy Poll }

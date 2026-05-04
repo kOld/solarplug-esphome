@@ -1,0 +1,309 @@
+# Canonical command inventory used to keep docs, decoder tests, and ESPHome
+# write policy aligned. This file is development metadata only; the ESP32
+# firmware uses generated/static C++ data, not runtime YAML parsing.
+
+read_commands:
+  - key: status
+    label: HSTS
+    frame_style: ascii_cr
+    tier: fast
+  - key: grid
+    label: HGRID
+    frame_style: ascii_cr
+    tier: fast
+  - key: output
+    label: HOP
+    frame_style: ascii_cr
+    tier: fast
+  - key: battery
+    label: HBAT
+    frame_style: ascii_cr
+    tier: fast
+  - key: pv
+    label: HPV
+    frame_style: ascii_cr
+    tier: fast
+  - key: temperature
+    label: HTEMP
+    frame_style: ascii_cr
+    tier: fast
+  - key: generation
+    label: HGEN
+    frame_style: ascii_cr
+    tier: energy
+  - key: bms1
+    label: HBMS1
+    frame_style: ascii_cr
+    tier: energy
+  - key: bms2
+    label: HBMS2
+    frame_style: ascii_cr
+    tier: energy
+  - key: bms3
+    label: HBMS3
+    frame_style: ascii_cr
+    tier: energy
+  - key: identity
+    label: QPRTL
+    frame_style: ascii_cr
+    tier: identity
+  - key: firmware
+    label: HIMSG1
+    frame_style: ascii_cr
+    tier: identity
+  - key: heep1
+    label: HEEP1
+    frame_style: ascii_cr
+    tier: identity
+  - key: heep2
+    label: HEEP2
+    frame_style: ascii_cr
+    tier: identity
+  - key: pv_battery
+    label: HPVB
+    frame_style: ascii_cr
+    tier: identity
+
+write_controls:
+  - key: buzzer
+    domain: switch
+    portal_key: buzzerOn
+    portal_label: Buzzer On
+    off_template: PDa
+    on_template: PEa
+    frame_style: crc_xmodem_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: backlight
+    domain: switch
+    portal_key: backlightOn
+    portal_label: Backlight On
+    off_template: PDx`Y
+    on_template: PExSh
+    frame_style: ascii_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: display_return_homepage
+    domain: switch
+    portal_key: displayAutomaticallyReturnsToHomepage
+    portal_label: Display Automatically Returns To Homepage
+    off_template: PDk
+    off_frame_style: crc_xmodem_cr
+    on_template: PEkq:
+    on_frame_style: ascii_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: over_temperature_restart
+    domain: switch
+    portal_key: overTemperatureAutomaticRestart
+    portal_label: Over Temperature Automatic Restart
+    off_template: PDv
+    on_template: PEv
+    frame_style: crc_xmodem_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: overload_restart
+    domain: switch
+    portal_key: overloadAutomaticRestart
+    portal_label: Overload Automatic Restart
+    off_template: PDu
+    on_template: PEu
+    frame_style: crc_xmodem_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: input_source_detection_prompt_sound
+    domain: switch
+    portal_key: inputSourceDetectionPromptSound
+    portal_label: Input Source Detection Prompt Sound
+    off_template: PDypx
+    on_template: PEyCI
+    frame_style: ascii_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: battery_equalization_mode_enable
+    domain: switch
+    portal_key: batteryEqualizationModeEnableSetting
+    portal_label: Battery Equalization Mode Enable Setting
+    off_template: PBEQE0Z2
+    off_frame_style: ascii_cr
+    on_template: PBEQE1
+    on_frame_style: crc_xmodem_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: bms_function_enable
+    domain: switch
+    portal_key: bmsFunctionEnableSetting
+    portal_label: BMS Function Enable Setting
+    off_template: BMSC00
+    on_template: BMSC01
+    frame_style: crc_xmodem_cr
+    policy: topology_risk
+    profile: lab
+    disabled_by_default: true
+  - key: battery_equalization_voltage
+    domain: number
+    portal_key: batteryEqualizationVoltageSetting
+    portal_label: Battery Equalization Voltage Setting
+    request_template: PBEQV<XX.XX>
+    frame_style: crc_xmodem_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: battery_recharge_voltage
+    domain: number
+    portal_key: batteryRechargeVoltageSetting
+    portal_label: Battery Recharge Voltage Setting
+    request_template: PBCV<XX.X>
+    frame_style: crc_xmodem_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: battery_redischarge_voltage
+    domain: number
+    portal_key: batteryRedischargeVoltageSetting
+    portal_label: Battery Redischarge Voltage Setting
+    request_template: PBDV<XX.X>
+    frame_style: crc_xmodem_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: battery_equalization_interval
+    domain: number
+    portal_key: batteryEqualizationIntervalSetting
+    portal_label: Battery Equalization Interval Setting
+    request_template: PBEQP<DDD>
+    frame_style: crc_xmodem_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: battery_equalization_timeout
+    domain: number
+    portal_key: batteryEqualizationTimeoutSetting
+    portal_label: Battery Equalization Timeout Setting
+    request_template: PBEQOT<DDD>
+    frame_style: crc_xmodem_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: battery_equalization_time
+    domain: number
+    portal_key: batteryEqualizationTimeSetting
+    portal_label: Battery Equalization Time Setting
+    request_template: PBEQT<DDD>
+    frame_style: crc_xmodem_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: bms_lock_machine_battery_capacity
+    domain: number
+    portal_key: bmsLockMachineBatteryCapacitySetting
+    portal_label: BMS Lock Machine Battery Capacity (%)
+    request_template: BMSSDC<DDD>
+    frame_style: crc_xmodem_cr
+    policy: topology_risk
+    profile: lab
+    disabled_by_default: true
+  - key: grid_connected_current
+    domain: number
+    portal_key: gridConnectedCurrentSetting
+    portal_label: Grid Connected Current Setting
+    request_template: PGFC<DDD>
+    frame_style: crc_xmodem_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: maximum_mains_charging_current
+    domain: number
+    portal_key: maxMainsChargingCurrentSetting
+    portal_label: Maximum Mains Charging Current Setting
+    request_template: MUCHGC<DDD>
+    frame_style: crc_xmodem_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: maximum_charging_current
+    domain: number
+    portal_key: maxChargingCurrentSetting
+    portal_label: Maximum Charging Current Setting
+    request_template: MNCHGC<DDD>
+    frame_style: crc_xmodem_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: restore_second_output_battery_capacity
+    domain: number
+    portal_key: restoreSecondOutputBatCapacitySetting
+    portal_label: Restore Second Output Battery Capacity Setting
+    request_template: PDSRS<DDD>
+    frame_style: crc_xmodem_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: restore_second_output_delay_time
+    domain: number
+    portal_key: restoreSecondOutputDelayTimeSetting
+    portal_label: Restore Second Output Delay Time Setting
+    request_template: PDDLYT<DDD>
+    frame_style: crc_xmodem_cr
+    policy: confirmed_ack_no_readback
+    profile: lab
+  - key: battery_type
+    domain: select
+    portal_key: batteryTypeSetting
+    portal_label: Battery Type Setting
+    options:
+      LIA: PBT03
+      PYL: PBT04
+    frame_style: crc_xmodem_cr
+    policy: topology_risk
+    profile: lab
+    disabled_by_default: true
+  - key: charger_priority
+    domain: select
+    portal_key: chargerPrioritySetting
+    portal_label: Charger Priority Setting
+    options:
+      CSO: PCP00
+      SNU: PCP01
+      OSO: PCP02
+    frame_style: crc_xmodem_cr
+    policy: topology_risk
+    profile: lab
+    disabled_by_default: true
+  - key: output_source_priority
+    domain: select
+    portal_key: outputSourcePrioritySetting
+    portal_label: Output Source Priority Setting
+    options:
+      SUB priority: POP00
+      SBU priority: POP01
+      Utility first (legacy): POP02
+    frame_style: crc_xmodem_cr
+    policy: topology_risk
+    profile: lab
+    disabled_by_default: true
+  - key: pv_energy_feeding_priority
+    domain: select
+    portal_key: pvEnergyFeedingPrioritySetting
+    portal_label: PV Energy Feeding Priority Setting
+    options:
+      BLU: PVENGUSE00
+      LBU: PVENGUSE01
+    frame_style: crc_xmodem_cr
+    policy: topology_risk
+    profile: lab
+    disabled_by_default: true
+  - key: battery_cut_off_voltage
+    domain: number
+    portal_key: batteryCutOffVoltageSetting
+    portal_label: Battery Cut Off Voltage Setting
+    request_template: PSDV<XX.X>
+    frame_style: crc_xmodem_cr
+    policy: bus_observed_nak
+    profile: unsafe
+  - key: battery_float_voltage
+    domain: number
+    portal_key: batteryFloatChargingVoltageSetting
+    portal_label: Battery Float Charging Voltage Setting
+    request_template: PBFT<XX.X>
+    frame_style: crc_xmodem_cr
+    policy: bus_observed_nak
+    profile: unsafe
+  - key: battery_bulk_voltage
+    domain: number
+    portal_key: batteryConstantChargingVoltageSetting
+    portal_label: Battery Constant Charging Voltage Setting
+    request_template: PCVV<XX.X>
+    frame_style: crc_xmodem_cr
+    policy: portal_rejected
+    profile: unsafe

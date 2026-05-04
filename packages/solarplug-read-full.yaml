@@ -1,0 +1,77 @@
+solarplug:
+  id: solarplug_reader
+  uart_id: uart_main
+  passive_mode: false
+  response_timeout_ms: 1500ms
+  boot_poll_delay: 10s
+  fast_poll_interval: 20s
+  energy_poll_interval: 60s
+  identity_poll_interval: 30min
+  sensors:
+    ac_input_voltage: { name: AC Input Voltage, icon: mdi:transmission-tower-import }
+    mains_frequency: { name: Mains Frequency, icon: mdi:sine-wave }
+    mains_power: { name: Mains Power, icon: mdi:transmission-tower-import }
+    ac_output_voltage: { name: AC Output Voltage, icon: mdi:home-lightning-bolt }
+    ac_output_frequency: { name: AC Output Frequency, icon: mdi:sine-wave }
+    output_apparent_power: { name: Output Apparent Power, icon: mdi:flash-outline }
+    output_active_power: { name: Output Active Power, icon: mdi:flash }
+    output_load: { name: Output Load, icon: mdi:gauge }
+    pv_voltage: { name: PV Voltage, icon: mdi:solar-panel }
+    pv_current: { name: PV Current, icon: mdi:current-dc }
+    pv_power: { name: PV Power, icon: mdi:solar-power-variant }
+    pv_generation_power:
+      name: HPV Generation Power
+      icon: mdi:solar-power-variant-outline
+      disabled_by_default: true
+    inverter_temperature: { name: Inverter Temperature, icon: mdi:thermometer }
+    boost_temperature: { name: Boost Temperature, icon: mdi:thermometer-lines }
+    transformer_temperature: { name: Transformer Temperature, icon: mdi:thermometer-lines }
+    pv_temperature: { name: PV Temperature, icon: mdi:solar-panel }
+    fan_1_speed: { name: Fan 1 Speed, icon: mdi:fan }
+    fan_2_speed: { name: Fan 2 Speed, icon: mdi:fan }
+    battery_voltage: { name: Battery Voltage, icon: mdi:battery-high }
+    battery_capacity: { name: Battery Capacity, icon: mdi:battery }
+    battery_charging_current: { name: Battery Charging Current, icon: mdi:battery-arrow-up }
+    battery_discharge_current: { name: Battery Discharge Current, icon: mdi:battery-arrow-down }
+    bus_voltage: { name: Bus Voltage, icon: mdi:current-dc }
+    daily_power_gen: { name: Daily Power Gen, icon: mdi:solar-power-variant }
+    monthly_electricity_generation: { name: Monthly Electricity Generation, icon: mdi:calendar-month }
+    yearly_electricity_generation: { name: Yearly Electricity Generation, icon: mdi:calendar }
+    total_power_generation: { name: Total Power Generation, icon: mdi:counter }
+    bms_soc:
+      name: BMS SOC
+      icon: mdi:battery
+      disabled_by_default: true
+    hpvb_pv_power:
+      name: HPVB PV Power
+      icon: mdi:solar-power-variant
+      disabled_by_default: true
+  text_sensors:
+    operating_mode: { name: Operating Mode, icon: mdi:power-plug }
+    battery_type: { name: Battery Type, icon: mdi:battery-sync }
+    device_type: { name: Device Type, icon: mdi:identifier }
+    software_version: { name: Software Version, icon: mdi:tag-text }
+    generation_date: { name: Generation Date, icon: mdi:calendar-today }
+    generation_time: { name: Generation Time, icon: mdi:clock-outline }
+    mains_current_flow_direction: { name: HGRID Direction, icon: mdi:transmission-tower-import }
+    hsts_status_bits:
+      name: HSTS Status Bits
+      icon: mdi:code-brackets
+      disabled_by_default: true
+    heep1_raw_payload:
+      name: HEEP1 Raw Payload
+      icon: mdi:file-document-outline
+      disabled_by_default: true
+    heep2_raw_payload:
+      name: HEEP2 Raw Payload
+      icon: mdi:file-document-outline
+      disabled_by_default: true
+    hpvb_raw_payload:
+      name: HPVB Raw Payload
+      icon: mdi:file-document-outline
+      disabled_by_default: true
+  buttons:
+    refresh_fast: { name: Refresh Fast Poll, icon: mdi:refresh }
+    refresh_energy: { name: Refresh Energy Poll, icon: mdi:solar-power-variant }
+    refresh_identity: { name: Refresh Identity Poll, icon: mdi:identifier }
+    refresh_all: { name: Refresh All Poll, icon: mdi:refresh-circle }
