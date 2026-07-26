@@ -250,9 +250,11 @@ FieldList decode_hbat(const std::vector<std::string> &tokens) {
   fields.reserve(8);
   if (!tokens.empty()) {
     add_field(fields, "battery_type_code", tokens[0], nullptr, "high");
-    if (tokens[0] == "04") {
+    if (tokens[0] == "04")
       add_field(fields, "battery_type", "PYL", nullptr, "high");
-    } else {
+    if (tokens[0] == "02")
+      add_field(fields, "battery_type", "USE", nullptr, "high");
+    else {
       add_field(fields, "battery_type", tokens[0], nullptr, "medium");
     }
   }
@@ -543,7 +545,7 @@ bool SolarPlugComponent::is_allowed_command_(const std::string &command) {
 
 bool SolarPlugComponent::is_known_passive_label_(const std::string &command) {
   return is_allowed_command_(command) || command == "PCP00" || command == "PCP01" || command == "PCP02" || command == "PCP03" ||
-         command == "POP00" || command == "POP01" || command == "POP02" || command == "PVENGUSE00" ||
+         command == "POP00" || command == "POP01" || command == "POP02" || command == "POP03" || command == "PVENGUSE00" ||
          command == "PVENGUSE01" || command == "PVENGUSE02";
 }
 
@@ -674,6 +676,9 @@ bool SolarPlugComponent::send_write_select(const std::string &key, const std::st
     if (value == "OSO") {
       return this->queue_write_frame_("Charger Priority Setting", "PCP02", FrameStyle::CRC_XMODEM_CR);
     }
+    if (value == "SOR") {
+      return this->queue_write_frame_("Charger Priority Setting", "PCP03", FrameStyle::CRC_XMODEM_CR);
+    }    
   }
   if (key == "output_source_priority") {
     if (value == "SUB" || value == "SUB priority") {
@@ -685,6 +690,9 @@ bool SolarPlugComponent::send_write_select(const std::string &key, const std::st
     if (value == "Utility first" || value == "Utility first (legacy)") {
       return this->queue_write_frame_("Output Source Priority Setting", "POP02", FrameStyle::CRC_XMODEM_CR);
     }
+    if (value == "PEC" || value == "PEC Mode (CT)") {
+      return this->queue_write_frame_("Output Source Priority Setting", "POP03", FrameStyle::CRC_XMODEM_CR);
+    }    
   }
   if (key == "pv_energy_feeding_priority") {
     if (value == "BLU") {
@@ -695,12 +703,33 @@ bool SolarPlugComponent::send_write_select(const std::string &key, const std::st
     }
   }
   if (key == "battery_type") {
+    if (value == "AGM") {
+      return this->queue_write_frame_("Battery Type Setting", "PBT01", FrameStyle::CRC_XMODEM_CR);
+    }
+    if (value == "USE") {
+      return this->queue_write_frame_("Battery Type Setting", "PBT02", FrameStyle::CRC_XMODEM_CR);
+    }    
     if (value == "LIA") {
       return this->queue_write_frame_("Battery Type Setting", "PBT03", FrameStyle::CRC_XMODEM_CR);
     }
     if (value == "PYL") {
       return this->queue_write_frame_("Battery Type Setting", "PBT04", FrameStyle::CRC_XMODEM_CR);
     }
+    if (value == "TQF") {
+      return this->queue_write_frame_("Battery Type Setting", "PBT05", FrameStyle::CRC_XMODEM_CR);
+    }
+    if (value == "GRO") {
+      return this->queue_write_frame_("Battery Type Setting", "PBT06", FrameStyle::CRC_XMODEM_CR);
+    }
+    if (value == "FEL") {
+      return this->queue_write_frame_("Battery Type Setting", "PBT07", FrameStyle::CRC_XMODEM_CR);
+    }
+    if (value == "LIB") {
+      return this->queue_write_frame_("Battery Type Setting", "PBT08", FrameStyle::CRC_XMODEM_CR);
+    }
+    if (value == "LIC") {
+      return this->queue_write_frame_("Battery Type Setting", "PBT09", FrameStyle::CRC_XMODEM_CR);
+    }    
   }
   ESP_LOGW(TAG, "unknown write select key=%s value=%s", key.c_str(), value.c_str());
   return false;

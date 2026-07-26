@@ -242,8 +242,15 @@ write_controls:
     portal_key: batteryTypeSetting
     portal_label: Battery Type Setting
     options:
+      AGM: PBT01
+      USE: PBT02
       LIA: PBT03
       PYL: PBT04
+      TQF: PBT05
+      GRO: PBT06
+      FEL: PBT06
+      LIB: PBT07
+      LIC: PBT08
     frame_style: crc_xmodem_cr
     policy: topology_risk
     profile: lab
@@ -256,6 +263,7 @@ write_controls:
       CSO: PCP00
       SNU: PCP01
       OSO: PCP02
+      SOR: PCP03
     frame_style: crc_xmodem_cr
     policy: topology_risk
     profile: lab
@@ -268,6 +276,7 @@ write_controls:
       SUB priority: POP00
       SBU priority: POP01
       Utility first (legacy): POP02
+      PEC Mode (CT): POP3
     frame_style: crc_xmodem_cr
     policy: topology_risk
     profile: lab
