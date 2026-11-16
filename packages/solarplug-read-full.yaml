@@ -60,7 +60,7 @@ solarplug:
     inductor_power: { name: Inductor Power, icon: mdi:sine-wave }
     rated_inverter_power: { name: Rated Inverter Power, icon: mdi:flash }
     rated_mppt_power: { name: Rated MPPT Power, icon: mdi:solar-power }
-    rated_ac_power: { name: Rated AC Power, icon: mdi:transmission-tower }
+    rated_ac_power: { name: AC Power Capacity, icon: mdi:transmission-tower }  # HIMSG2[2]: 6200 W on battery, AC input V x 40 A on mains
     ct_zero_adjust_power: { name: CT Zero Adjust Power, icon: mdi:current-ac, disabled_by_default: true }  # HEEP3[3], unconfirmed
     # HPVINV07 / 08 only (vendor tool); never polled on other models.
     grid_power_limit: { name: Grid Power Limit, icon: mdi:transmission-tower-export, disabled_by_default: true }

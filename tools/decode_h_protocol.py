@@ -1597,9 +1597,13 @@ def decode_hgrid(payload: str) -> dict[str, Any]:
         decoded["mains_power_w"] = parse_scalar(tokens[6])
     if len(tokens) > 7:
         decoded["mains_current_flow_direction_code"] = tokens[7]
-        decoded["mains_current_flow_direction"] = MAINS_CURRENT_FLOW_DIRECTION_LABELS.get(
-            tokens[7], f"unknown:{tokens[7]}"
-        )
+        # [7] is the sign of [6]; it stays 0 while nothing flows, so an idle input reads "No Flow".
+        if decoded.get("mains_power_w") == 0:
+            decoded["mains_current_flow_direction"] = "No Flow"
+        else:
+            decoded["mains_current_flow_direction"] = MAINS_CURRENT_FLOW_DIRECTION_LABELS.get(
+                tokens[7], f"unknown:{tokens[7]}"
+            )
     if len(tokens) > 8:
         decoded["rated_power_w"] = parse_scalar(tokens[8])
     if len(tokens) > 9:

@@ -323,7 +323,11 @@ FieldList decode_hgrid(const std::vector<std::string> &tokens) {
     add_field(fields, "mains_power_w", tokens[6], "W", "high");
   if (tokens.size() > 7) {
     add_field(fields, "mains_current_flow_direction_code", tokens[7], nullptr, "high");
-    if (tokens[7] == "0") {
+    // [7] is the sign of [6]; it stays 0 while nothing flows, so an idle input would read "Mains To Inverter".
+    const auto mains_power = parse_optional_float(tokens[6]);
+    if (mains_power.has_value() && *mains_power == 0.0f) {
+      add_field(fields, "mains_current_flow_direction", "No Flow", nullptr, "high");
+    } else if (tokens[7] == "0") {
       add_field(fields, "mains_current_flow_direction", "Mains To Inverter", nullptr, "high");
     } else if (tokens[7] == "1") {
       add_field(fields, "mains_current_flow_direction", "Inverter To Mains", nullptr, "high");

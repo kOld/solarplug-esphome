@@ -1111,6 +1111,12 @@ class FirmwareCodecTest(unittest.TestCase):
                 fields, readings = {}, {}
         return frames
 
+    def test_hgrid_idle_reads_no_flow(self) -> None:
+        frames = {payload: fields for command, payload, fields, _ in self._dump() if command == "HGRID"}
+        self.assertEqual(frames["(245.7 50.0 280 090 70 40 +00000 0 06500 11+00000"]["mains_current_flow_direction"], "No Flow")
+        self.assertEqual(frames["(242.0 49.9 280 090 70 40 +00620 0 06500 11+00000"]["mains_current_flow_direction"],
+                         "Mains To Inverter")
+
     def test_corpus_parity_with_python_reference(self) -> None:
         frames = self._dump()
         self.assertGreater(len(frames), 50)
@@ -1146,6 +1152,11 @@ class FirmwareCodecTest(unittest.TestCase):
                 same(m.decode_hsts_status(payload), fields, label)
             elif command == "HBMS1":
                 same(m.decode_hbms1_status(payload), fields, label)
+            elif command == "HGRID":
+                py = m.decode_hgrid(payload)
+                keys = ("ac_input_voltage_v", "mains_frequency_hz", "mains_power_w",
+                        "mains_current_flow_direction_code", "mains_current_flow_direction", "rated_power_w")
+                same({key: py[key] for key in keys if key in py}, fields, label)
             elif command in ("HOP", "HTEMP", "HIMSG1", "HIMSG2", "HBAT", "HEEP3", "HSTS2", "HCTMSG1"):
                 same(m.decode_extra_fields(command, payload), fields, label)
             if command == "HTEMP":
