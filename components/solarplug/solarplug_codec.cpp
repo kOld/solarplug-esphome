@@ -45,6 +45,8 @@ size_t min_tokens_for(const std::string &command) {
   if (command == "HEEP1") return 18;
   if (command == "HEEP2") return 14;
   if (command == "HEEP3") return 4;
+  if (command == "HSTS2") return 3;
+  if (command == "HCTMSG1") return 4;
   if (command == "HPVB") return 5;
   // PI30 reads (CRC-framed). QPIRI is 25 fields on HPVINV02 fw 40.05; fields up to 18 are consumed.
   if (command == "QPIRI") return 18;
@@ -506,6 +508,42 @@ FieldList decode_heep3(const std::vector<std::string> &tokens) {
   if (tokens.size() > 3 && tokens[3].size() == 4 && is_digits(tokens[3])) {
     add_field(fields, "ct_zero_adjust_power_w", tokens[3], "W", "low");
   }
+  // HPVINV07/08 only (vendor HEEP3_PDF): [5] grid power limit (PGFP), [6] battery discharge current limit
+  // (DISCC). HPVINV02 answers with 5 tokens, so these stay absent here.
+  if (tokens.size() > 5 && is_digits(tokens[5])) add_field(fields, "grid_power_limit_w", tokens[5], "W", "low");
+  if (tokens.size() > 6 && is_digits(tokens[6])) add_field(fields, "discharge_current_limit_a", tokens[6], "A", "low");
+  return fields;
+}
+
+// HSTS2 (HPVINV08; vendor HSTS2_HPVINV08 decoder, sample "(00 B0010001 10701000 0000..."):
+//   [1] d1 PV present, d2 AC input, d3 inverter output, d4 grid-tie, d5 energy to load, d6 battery charging,
+//       d7 battery discharging; [2] d0 inverter state, d1 PV voltage OK, d2 inverter bridge, d3 MPPT, d4 PLL.
+// The [2] digits are not all 0/1 in the vendor sample, so they are reported raw.
+FieldList decode_hsts2(const std::vector<std::string> &tokens) {
+  FieldList fields = decode_heep(tokens);
+  if (tokens.size() > 1 && tokens[1].size() >= 8) {
+    static const char *const labels[] = {nullptr,  "PV",     "AC input",          "output",
+                                         "grid-tie", "to load", "battery charging", "battery discharging"};
+    std::string flow;
+    for (size_t pos = 1; pos <= 7; pos++) {
+      if (tokens[1][pos] == '1') flow += (flow.empty() ? "" : ", ") + std::string(labels[pos]);
+    }
+    add_field(fields, "power_flow", flow.empty() ? "None" : flow, nullptr, "low");
+  }
+  if (tokens.size() > 2 && tokens[2].size() >= 5) {
+    const std::string &t = tokens[2];
+    add_field(fields, "inverter_flags",
+              std::string("state ") + t[0] + ", PV OK " + t[1] + ", bridge " + t[2] + ", MPPT " + t[3] + ", PLL " + t[4],
+              nullptr, "low");
+  }
+  return fields;
+}
+
+// HCTMSG1 (HPVINV07/08; vendor HCTMSG1_PDF): [0] CT current (first 4 characters), [3] CT power.
+FieldList decode_hctmsg1(const std::vector<std::string> &tokens) {
+  FieldList fields = decode_heep(tokens);
+  if (!tokens.empty() && tokens[0].size() >= 4) add_field(fields, "ct_current_a", tokens[0].substr(0, 4), "A", "low");
+  if (tokens.size() > 3) add_field(fields, "ct_power_w", tokens[3], "W", "low");
   return fields;
 }
 
@@ -714,6 +752,8 @@ FieldList decode_fields(const std::string &command, const std::string &payload) 
   if (command == "HEEP2") return decode_heep2(tokens);
   if (command == "HIMSG2") return decode_himsg2(tokens);
   if (command == "HEEP3") return decode_heep3(tokens);
+  if (command == "HSTS2") return decode_hsts2(tokens);
+  if (command == "HCTMSG1") return decode_hctmsg1(tokens);
   if (command == "QPIRI") return decode_qpiri(tokens);
   if (command == "QFLAG" || command == "QBEQI" || command == "QMCHGCR" || command == "QMUCHGCR")
     return decode_heep(tokens);  // raw + token_NN

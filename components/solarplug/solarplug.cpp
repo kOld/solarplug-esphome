@@ -163,14 +163,14 @@ bool SolarPlugComponent::is_allowed_command_(const std::string &command) {
          command == "HBMS3" || command == "QPRTL" || command == "HIMSG1" || command == "HGEN" ||
          command == "HBAT" || command == "HOP" || command == "HGRID" || command == "HPV" ||
          command == "HEEP1" || command == "HEEP2" || command == "HEEP3" || command == "HPVB" || command == "HIMSG2" ||
-         is_pi30_query_(command) || is_probe_only_command_(command);
+         command == "HSTS2" || command == "HCTMSG1" || is_pi30_query_(command) || is_probe_only_command_(command);
 }
 
 // Read-only queries that are never polled but may be probed once from the API: H reads the vendor tool
 // uses for sibling models (HEEP3, HCTMSG1, HSTS2) plus PI30/PI17 identity and status queries.
 // Q commands go out with CRC like every PI30 query. No setter is ever on this list.
 bool SolarPlugComponent::is_probe_only_command_(const std::string &command) {
-  static const char *const probes[] = {"HEEP4", "HCTMSG1", "HSTS2", "HSTS3",  "QPI",    "QMN",
+  static const char *const probes[] = {"HEEP4", "HSTS3",  "QPI",    "QMN",
                                        "QGMN",  "QID",   "QSID",    "QVFW",  "QVFW2", "QVFW3", "QPIGS",
                                        "QPIGS2", "QMOD", "QPIWS",   "QDI",   "QOPPT", "QCHPT", "QT"};
   for (const char *probe : probes) {
@@ -390,6 +390,16 @@ bool SolarPlugComponent::send_write_select(const std::string &key, const std::st
   return true;
 }
 
+// Blocks the vendor tool polls only for some models: HSTS2 on HPVINV08, HCTMSG1 on HPVINV07 / 08. Elsewhere
+// they time out (HPVINV02 fw 40.05), so they are not polled until the model is known to have them.
+bool SolarPlugComponent::model_has_command_(const std::string &command) const {
+  if (command != "HSTS2" && command != "HCTMSG1") return true;
+  const auto type = this->machine_type_();
+  const bool hpvinv08 = type.has_value() && *type == codec::MachineType::F;
+  const bool hpvinv07 = this->latest_.qprtl_device_type.find("HPVINV07") != std::string::npos;
+  return command == "HSTS2" ? hpvinv08 : (hpvinv08 || hpvinv07);
+}
+
 void SolarPlugComponent::queue_commands_(const char *const *commands, size_t count) {
   for (size_t index = 0; index < count; index++) {
     // Scheduled polls skip commands nobody consumes (e.g. HBMS3 returns 16 zeroed cells here):
@@ -397,12 +407,14 @@ void SolarPlugComponent::queue_commands_(const char *const *commands, size_t cou
     if (this->scheduled_poll_ && !this->command_has_consumer_(commands[index])) {
       continue;
     }
+    if (!this->model_has_command_(commands[index])) continue;
     this->send_command(commands[index]);
   }
 }
 
 void SolarPlugComponent::queue_command_group_(const std::string &group) {
-  static const char *const fast_commands[] = {"HSTS", "HGRID", "HOP", "HBAT", "HPV", "HTEMP"};
+  // HSTS2 / HCTMSG1 are queued only on the models that answer them (model_has_command_).
+  static const char *const fast_commands[] = {"HSTS", "HGRID", "HOP", "HBAT", "HPV", "HTEMP", "HSTS2", "HCTMSG1"};
   static const char *const energy_commands[] = {"HGEN", "HBMS1", "HBMS2", "HBMS3"};
   static const char *const identity_commands[] = {"HIMSG1", "QPRTL", "HPVB", "HIMSG2", "QMCHGCR", "QMUCHGCR"};
   // Settings snapshots: every write control is seeded from these (HEEP1 first, so QPIRI/QFLAG can
@@ -1228,6 +1240,12 @@ void SolarPlugComponent::apply_decoded_field_(const std::string &command, const 
       this->publish_numeric_(command, field_name, value);  // no-op for non-numeric values
       this->publish_text_(command, field_name, value);
     }
+    return;
+  }
+
+  if (command == "HSTS2" || command == "HCTMSG1") {
+    this->publish_numeric_(command, field_name, value);  // no-op for text fields
+    this->publish_text_(command, field_name, value);
     return;
   }
 

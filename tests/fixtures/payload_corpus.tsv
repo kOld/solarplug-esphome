@@ -75,3 +75,5 @@ HEEP3	(2048 2048 2048 0150 00000000000000000000000000000000000000000000000000000
 # synthetic: the live HEEP1 in the generic GB3024 layout (extra [4]) and the LPVINV02 layout ([4] = d0-2 + buzzer), per the vendor tool
 HEEP1	(1 080 030 03311010230 7 012 1 1 0 0 1 020 025 040 050 056.4 056.4 042.0 020 0 0
 HEEP1	(1 080 030 03311010230 01201 1 0 0 1 020 025 040 050 056.4 056.4 042.0 020 0 0
+# vendor tool sample (HSTS2_HPVINV08_ViewModel.cs comment), padded to the minimum token count
+HSTS2	(00 B0010001 10701000 0000

@@ -1996,8 +1996,27 @@ def decode_extra_fields(command: str, payload: str) -> dict[str, Any]:
                 out[key] = tokens[index]
         if len(tokens) > 16 and len(tokens[16]) == 5 and tokens[16].isdigit():
             out["second_output_discharge_time_min"] = int(tokens[16][2:])
-    elif command == "HEEP3" and len(tokens) > 3 and len(tokens[3]) == 4 and tokens[3].isdigit():
-        out["ct_zero_adjust_power_w"] = tokens[3]  # unconfirmed on HPVINV02 (vendor: HPVINV07/08 EZCTP)
+    elif command == "HEEP3":
+        if len(tokens) > 3 and len(tokens[3]) == 4 and tokens[3].isdigit():
+            out["ct_zero_adjust_power_w"] = tokens[3]  # unconfirmed on HPVINV02 (vendor: HPVINV07/08 EZCTP)
+        if len(tokens) > 5 and tokens[5].isdigit():
+            out["grid_power_limit_w"] = tokens[5]
+        if len(tokens) > 6 and tokens[6].isdigit():
+            out["discharge_current_limit_a"] = tokens[6]
+    elif command == "HSTS2":
+        labels = {1: "PV", 2: "AC input", 3: "output", 4: "grid-tie", 5: "to load", 6: "battery charging",
+                  7: "battery discharging"}
+        if len(tokens) > 1 and len(tokens[1]) >= 8:
+            flow = [labels[i] for i in range(1, 8) if tokens[1][i] == "1"]
+            out["power_flow"] = ", ".join(flow) if flow else "None"
+        if len(tokens) > 2 and len(tokens[2]) >= 5:
+            t = tokens[2]
+            out["inverter_flags"] = f"state {t[0]}, PV OK {t[1]}, bridge {t[2]}, MPPT {t[3]}, PLL {t[4]}"
+    elif command == "HCTMSG1":
+        if tokens and len(tokens[0]) >= 4:
+            out["ct_current_a"] = tokens[0][:4]
+        if len(tokens) > 3:
+            out["ct_power_w"] = tokens[3]
     elif command == "HBAT" and len(tokens) > 6 and len(tokens[6]) >= 3:
         sw = tokens[6]
         out["charge_switches"] = (

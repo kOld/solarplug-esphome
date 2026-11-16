@@ -495,6 +495,7 @@ class SolarPlugComponent : public Component, public uart::UARTDevice {
   std::vector<int> mains_charge_envelope_;
   bool in_charge_envelope_(bool mains, int amps) const;
   void note_machine_type_(const std::string &device_type);
+  bool model_has_command_(const std::string &command) const;
   bool response_crc_{false};            // config: keep the inverter in response-CRC mode
   bool crc_keepalive_sent_{false};
   bool crc_keepalive_answered_{false};  // the first keep-alive finished (any status): state leaves Starting

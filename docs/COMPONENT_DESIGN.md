@@ -21,7 +21,7 @@ The component does not inherit `PollingComponent`. It has poll tiers, manual ref
 
 | Tier | Default interval | Commands | Feeds |
 |---|---|---|---|
-| `fast` | 20 s | `HSTS`, `HGRID`, `HOP`, `HBAT`, `HPV`, `HTEMP` | live telemetry, alarms, LEDs, relays, charge switches |
+| `fast` | 20 s | `HSTS`, `HGRID`, `HOP`, `HBAT`, `HPV`, `HTEMP`, plus `HSTS2` / `HCTMSG1` on HPVINV07/08 | live telemetry, alarms, LEDs, relays, charge switches |
 | `energy` | 60 s | `HGEN`, `HBMS1`, `HBMS2`, `HBMS3` | generation counters, BMS limits and status |
 | `settings` | 5 min | `HEEP1`, `HEEP2`, `QPIRI`\*, `QFLAG`\*, `QBEQI`\*, `HEEP3` | every write control's state, the read-only settings, the cross-check |
 | `identity` | 30 min | `HIMSG1`, `QPRTL`, `HPVB`, `HIMSG2`, `QMCHGCR`\*, `QMUCHGCR`\* | firmware, model, rated powers, the inverter's allowed charge currents |

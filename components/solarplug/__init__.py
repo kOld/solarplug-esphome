@@ -147,6 +147,11 @@ SENSOR_FIELDS = {
     "rated_mppt_power": ("HIMSG2", "rated_mppt_power_w", UNIT_WATT, DEVICE_CLASS_POWER, None, 0, ENTITY_CATEGORY_DIAGNOSTIC),
     "rated_ac_power": ("HIMSG2", "rated_ac_power_w", UNIT_WATT, DEVICE_CLASS_POWER, None, 0, ENTITY_CATEGORY_DIAGNOSTIC),
     "second_output_discharge_time": ("HEEP2", "second_output_discharge_time_min", "min", None, STATE_CLASS_MEASUREMENT, 0, ENTITY_CATEGORY_DIAGNOSTIC),
+    # HPVINV07 / 08 only (vendor tool); polled only on those models.
+    "grid_power_limit": ("HEEP3", "grid_power_limit_w", UNIT_WATT, DEVICE_CLASS_POWER, None, 0, ENTITY_CATEGORY_DIAGNOSTIC),
+    "discharge_current_limit": ("HEEP3", "discharge_current_limit_a", UNIT_AMPERE, DEVICE_CLASS_CURRENT, None, 0, ENTITY_CATEGORY_DIAGNOSTIC),
+    "ct_current": ("HCTMSG1", "ct_current_a", UNIT_AMPERE, DEVICE_CLASS_CURRENT, STATE_CLASS_MEASUREMENT, 1, None),
+    "ct_power": ("HCTMSG1", "ct_power_w", UNIT_WATT, DEVICE_CLASS_POWER, STATE_CLASS_MEASUREMENT, 0, None),
     "ct_zero_adjust_power": ("HEEP3", "ct_zero_adjust_power_w", UNIT_WATT, DEVICE_CLASS_POWER, None, 0, ENTITY_CATEGORY_DIAGNOSTIC),
     "bms_temperature": ("HBMS1", "bms_temperature_c", UNIT_CELSIUS, DEVICE_CLASS_TEMPERATURE, STATE_CLASS_MEASUREMENT, 2, ENTITY_CATEGORY_DIAGNOSTIC),
     # HEEP1 settings snapshot (1-based token index; candidate names from FIELD_MAP + live cross-check 2026-11-16).
@@ -214,6 +219,9 @@ TEXT_SENSOR_FIELDS = {
     "readback_cross_check": ("_CHECK", "readback_cross_check", ENTITY_CATEGORY_DIAGNOSTIC),
     # Machine type used for the priority codes, e.g. "B (HPVINV02)".
     "machine_type": ("_MODEL", "machine_type", ENTITY_CATEGORY_DIAGNOSTIC),
+    # HSTS2 (HPVINV08 only): power-flow flags and the raw inverter-state digits.
+    "power_flow": ("HSTS2", "power_flow", None),
+    "inverter_flags": ("HSTS2", "inverter_flags", ENTITY_CATEGORY_DIAGNOSTIC),
     "ac_output_mode": ("QPIRI", "ac_output_mode", ENTITY_CATEGORY_DIAGNOSTIC),
     "qflag_raw_payload": ("QFLAG", "raw_payload", ENTITY_CATEGORY_DIAGNOSTIC),
     "qbeqi_raw_payload": ("QBEQI", "raw_payload", ENTITY_CATEGORY_DIAGNOSTIC),

@@ -1146,7 +1146,7 @@ class FirmwareCodecTest(unittest.TestCase):
                 same(m.decode_hsts_status(payload), fields, label)
             elif command == "HBMS1":
                 same(m.decode_hbms1_status(payload), fields, label)
-            elif command in ("HOP", "HTEMP", "HIMSG1", "HIMSG2", "HBAT", "HEEP3"):
+            elif command in ("HOP", "HTEMP", "HIMSG1", "HIMSG2", "HBAT", "HEEP3", "HSTS2", "HCTMSG1"):
                 same(m.decode_extra_fields(command, payload), fields, label)
             if command == "HTEMP":
                 py = m.decode_htemp(payload)

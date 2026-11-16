@@ -158,7 +158,7 @@ The equalization mode enable row is also bus-confirmed. The live probe used a on
 `packages/solarplug-write-beta.yaml` adds two ESPHome API actions. In HA, run them from Developer tools > Actions as `esphome.<node>_probe_read` / `esphome.<node>_probe_write`. The raw reply, with the status (`supported`, `nak`, `timeout`, `crc_error`, `invalid_frame`, `ack`), appears on the **Probe Result** text sensor.
 
 - `probe_read` takes any command the component polls, or one of the unpolled read-only queries on its allow-list:
-  - **H reads** the vendor tool uses for sibling models: `HEEP4`, `HCTMSG1`, `HSTS2`, `HSTS3`. `HEEP3` is now polled.
+  - **H reads** with no decoder: `HEEP4`, `HSTS3`. `HSTS2` and `HCTMSG1` are decoded and polled on the models that have them, and can also be probed.
   - **PI30/PI17 identity and status queries**, sent with CRC: `QPI`, `QMN`, `QGMN`, `QID`, `QSID`, `QVFW`, `QVFW2`, `QVFW3`, `QPIGS`, `QPIGS2`, `QMOD`, `QPIWS`, `QDI`, `QOPPT`, `QCHPT`, `QT`.
 
   Anything else is refused. Setters are never on the list.

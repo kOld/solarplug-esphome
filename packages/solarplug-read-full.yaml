@@ -62,6 +62,11 @@ solarplug:
     rated_mppt_power: { name: Rated MPPT Power, icon: mdi:solar-power }
     rated_ac_power: { name: Rated AC Power, icon: mdi:transmission-tower }
     ct_zero_adjust_power: { name: CT Zero Adjust Power, icon: mdi:current-ac, disabled_by_default: true }  # HEEP3[3], unconfirmed
+    # HPVINV07 / 08 only (vendor tool); never polled on other models.
+    grid_power_limit: { name: Grid Power Limit, icon: mdi:transmission-tower-export, disabled_by_default: true }
+    discharge_current_limit: { name: Discharge Current Limit, icon: mdi:battery-arrow-down, disabled_by_default: true }
+    ct_current: { name: CT Current, icon: mdi:current-ac, disabled_by_default: true }
+    ct_power: { name: CT Power, icon: mdi:flash, disabled_by_default: true }
     second_output_discharge_time: { name: Setting Second Output Discharge Time, icon: mdi:timer-sand }
     bus_utilization: { name: Inverter Bus Utilization, icon: mdi:chart-donut }
     bus_response_time: { name: Inverter Bus Response Time, icon: mdi:timer-outline }
@@ -89,6 +94,8 @@ solarplug:
     battery_type: { name: Battery Type, icon: mdi:battery-sync }
     device_type: { name: Device Type, icon: mdi:identifier }
     machine_type: { name: Machine Type, icon: mdi:chip }  # priority code table in use, e.g. B (HPVINV02)
+    power_flow: { name: Power Flow, icon: mdi:transit-connection-variant, disabled_by_default: true }  # HSTS2, HPVINV08
+    inverter_flags: { name: Inverter Flags, icon: mdi:flag-outline, disabled_by_default: true }  # HSTS2, HPVINV08
     software_version: { name: Software Version, icon: mdi:tag-text }
     generation_date: { name: Generation Date, icon: mdi:calendar-today }
     generation_time: { name: Generation Time, icon: mdi:clock-outline }

@@ -88,6 +88,16 @@ solarplug:
 - **Generic GB3024 (21 tokens, an extra token at `[4]`):** the vendor tool used it for HPVINV06, and for HPVINV02 until its parser changed in September 2025. The vendor describes only the extra token's position, so the 21-token count is an inference until a capture confirms it.
 - **LPVINV02 / VQ3024 (19 tokens):** `[4]` packs the display, frequency and charger digits plus the buzzer.
 
+**Model-specific blocks.** These are polled only where the vendor tool polls them; on HPVINV02 fw 40.05 the first two time out. All values are VENDOR-only.
+
+| Block | Polled on | Decoded |
+|---|---|---|
+| `HSTS2` | type F (HPVINV08) | Power Flow (PV, AC input, output, grid-tie, to load, battery charging/discharging) and the raw inverter-state digits |
+| `HCTMSG1` | type F, HPVINV07 | CT current, CT power |
+| `HEEP3` | every model, settings tier | `[3]` CT zero-adjust power; `[5]` grid power limit and `[6]` battery discharge-current limit where present (HPVINV07/08) |
+
+Their setters (`EZCTP`, `PGFP`, `DISCC`) are not implemented. The vendor tool validates nothing, so their safe ranges are unknown.
+
 **Battery voltage.**
 - Voltage settings scale by `battery_voltage / 48`, with the frame resolving 0.1 V. On 24 V that gives:
   - recharge 22–25.5 V in 0.5 V steps;

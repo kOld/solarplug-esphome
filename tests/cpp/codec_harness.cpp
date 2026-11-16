@@ -177,6 +177,16 @@ int selftest() {
   check(qflag["overload_bypass"] == "on" && qflag["power_saving"] == "off", "qflag letters");
   check(readback("QFLAG", "(NAK").empty(), "qflag ignores NAK");
 
+  // HPVINV07/08 blocks (vendor tool samples).
+  const std::string hsts2 = "(00 B0010001 10701000 0000";
+  check(field("HSTS2", hsts2, "power_flow") == "output, battery discharging", "hsts2 power flow");
+  check(field("HSTS2", hsts2, "inverter_flags") == "state 1, PV OK 0, bridge 7, MPPT 0, PLL 1", "hsts2 inverter flags");
+  check(field("HCTMSG1", "(0123 0 0 00456", "ct_current_a") == "0123" && field("HCTMSG1", "(0123 0 0 00456", "ct_power_w") == "00456",
+        "hctmsg1 ct fields");
+  check(field("HEEP3", "(2048 2048 2048 0150 0 03000 040", "grid_power_limit_w") == "03000" &&
+            field("HEEP3", "(2048 2048 2048 0150 0 03000 040", "discharge_current_limit_a") == "040",
+        "heep3 HPVINV07/08 slots");
+
   // HEEP3 answers on HPVINV02 (probe 2026-11-16).
   check(field("HEEP3", "(2048 2048 2048 0150 0000000000000000000000000000000000000000000000000000000000",
               "ct_zero_adjust_power_w") == "0150",
