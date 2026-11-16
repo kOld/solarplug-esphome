@@ -149,7 +149,7 @@ The equalization mode enable row is also bus-confirmed. The live probe used a on
 
 | Command | Framing | Live reply (HPVINV02 fw 40.05) | Decode | Source |
 |---|---|---|---|---|
-| `HIMSG2` | ASCII + CR | rated inverter / MPPT / AC power: `6200` / `8500` / `6200` W | `[0]` rated inverter power, `[1]` rated MPPT (PV) power, `[2]` rated AC power. The vendor tool uses them as gauge denominators. `8500` W matches the manual's 8.5 kW PV maximum. | vendor tool `HIMSG2_PDF_ViewModel.cs`; first capture 2026-11-16 |
+| `HIMSG2` | ASCII + CR | rated inverter / MPPT / AC power: `6200` / `8500` / `6200` W in Battery mode; `6200` / `8500` / `9372` W in Mains mode | `[0]` rated inverter power, `[1]` rated MPPT (PV) power, `[2]` AC power capacity: the 6200 W rating in Battery mode, but the AC input voltage × 40 A in Mains mode (`9372` at 234.2 V, `9336` at 233.4 V), so it is live, not a rating. `[3]` stayed `6200`. The vendor tool uses `[1]` and `[2]` as gauge denominators. `8500` W matches the manual's 8.5 kW PV maximum. | vendor tool `HIMSG2_PDF_ViewModel.cs`; captures 2026-11-16 (Battery and Mains mode) |
 | `QMCHGCR` | PI30, CRC | `(010 020 030 040 050 060 070 080` | allowed `MNCHGC` values; the component validates writes against this list | log-proven 2026-04-25 and 2026-11-16 |
 | `QMUCHGCR` | PI30, CRC | `(002 010 020 030 040 050 060` | allowed `MUCHGC` values | same |
 

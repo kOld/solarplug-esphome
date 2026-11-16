@@ -490,8 +490,9 @@ FieldList decode_himsg1(const std::vector<std::string> &tokens) {
 
 FieldList decode_heep(const std::vector<std::string> &tokens);  // defined below
 
-// HIMSG2: rated totals the vendor tool polls for HPVINV02 and uses as gauge denominators
-// ([0] inverter, [1] MPPT, [2] AC input power). Never captured before 2026-11-16.
+// HIMSG2: totals the vendor tool polls for HPVINV02 and uses as gauge denominators: [0] rated inverter
+// power, [1] rated MPPT power, [2] AC power capacity. [2] is live: the 6200 W rating in Battery mode, the AC
+// input voltage x 40 A in Mains mode (9372 W at 234.2 V on 2026-11-16).
 FieldList decode_himsg2(const std::vector<std::string> &tokens) {
   FieldList fields = decode_heep(tokens);  // raw_payload + token_NN
   if (tokens.size() > 0) add_field(fields, "rated_inverter_power_w", tokens[0], "W", "medium");
