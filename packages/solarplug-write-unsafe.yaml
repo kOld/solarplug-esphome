@@ -1,0 +1,53 @@
+# Opt-in package for controls that are NAK-only on this firmware, never bus-tested, or able to cut the AC
+# output / change grid compliance. Include it AFTER solarplug-write-beta.yaml. Every entity is disabled by
+# default: enable one at a time in HA, change it once, and check Last Write Status and the readback.
+# Evidence and risks per control: docs/protocol/WRITE_SURFACE.md and docs/protocol/HEEP_SETTINGS_MAP.md.
+solarplug:
+  id: solarplug_reader
+  write_profile: unsafe
+  switches:
+    dual_output_mode:
+      name: Dual Output Mode
+      icon: mdi:power-socket-eu
+      disabled_by_default: true  # PDAULC; program 60. LCD meaning of HEEP2[0] unconfirmed.
+    second_output_power:
+      name: Second Output Power
+      icon: mdi:power-plug-off-outline
+      disabled_by_default: true  # PDAULON; switches the second output (L2 loads) immediately.
+    grid_feed:
+      name: Grid Feed Function
+      icon: mdi:transmission-tower-export
+      disabled_by_default: true  # GRIDFEED; exporting needs grid-operator approval.
+    ct_function:
+      name: CT Function
+      icon: mdi:current-ac
+      disabled_by_default: true  # EXTCT; needs a CT clamp. Not on the vendor HPVINV02 screen.
+  selects:
+    output_frequency:
+      name: Output Frequency
+      icon: mdi:sine-wave
+      disabled_by_default: true  # F50 / F60; wrong frequency can damage motors and clocks.
+    output_voltage:
+      name: Output Voltage
+      icon: mdi:flash-triangle-outline
+      disabled_by_default: true  # V220 / V230 / V240
+    output_mode:
+      name: AC Output Mode
+      icon: mdi:sitemap-outline
+      disabled_by_default: true  # POPM; PAL / 3P* on a single unit can stop the output.
+    grid_protocol:
+      name: Grid Protocol
+      icon: mdi:transmission-tower
+      disabled_by_default: true  # ^S???RS; country regulation (program 50).
+  numbers:
+    battery_cut_off_voltage: { name: Battery Cut Off Voltage, icon: mdi:battery-off-outline, disabled_by_default: true }
+    battery_bulk_voltage: { name: Battery Bulk Voltage, icon: mdi:battery-charging-high, disabled_by_default: true }
+    battery_float_voltage: { name: Battery Float Voltage, icon: mdi:battery-charging-medium, disabled_by_default: true }
+    low_battery_alarm_voltage: { name: Low Battery Alarm Voltage, icon: mdi:battery-alert, disabled_by_default: true }
+    second_output_cutoff_voltage: { name: Second Output Cut-off Voltage, icon: mdi:power-plug-off, disabled_by_default: true }
+    second_output_recovery_voltage: { name: Second Output Recovery Voltage, icon: mdi:power-plug, disabled_by_default: true }
+    # ^S???ACCT / ^S???ACLT; readback layout of HEEP2[11]/[12] is tentative until LCD experiment E1.
+    ac_charge_start_hour: { name: AC Charge Start Hour, icon: mdi:clock-start, disabled_by_default: true }
+    ac_charge_stop_hour: { name: AC Charge Stop Hour, icon: mdi:clock-end, disabled_by_default: true }
+    ac_output_start_hour: { name: AC Output Start Hour, icon: mdi:clock-start, disabled_by_default: true }
+    ac_output_stop_hour: { name: AC Output Stop Hour, icon: mdi:clock-end, disabled_by_default: true }

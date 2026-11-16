@@ -1635,8 +1635,7 @@ def decode_hbat(payload: str) -> dict[str, Any]:
     tokens = split_payload(payload)
     decoded: dict[str, Any] = {"raw_payload": payload, "tokens": tokens}
     if len(tokens) > 0:
-        decoded["battery_type_code"] = tokens[0]
-        decoded["battery_type"] = BATTERY_TYPE_LABELS.get(tokens[0], tokens[0])
+        decoded["battery_series_count"] = parse_scalar(tokens[0])  # 12 V blocks in series, not the battery type
     if len(tokens) > 1:
         decoded["battery_voltage_v"] = parse_scalar(tokens[1])
     if len(tokens) > 2:
@@ -1672,19 +1671,19 @@ def decode_htemp(payload: str) -> dict[str, Any]:
     tokens = split_payload(payload)
     decoded: dict[str, Any] = {"raw_payload": payload, "tokens": tokens}
     if len(tokens) > 0:
-        decoded["inverter_temperature_c"] = parse_scalar(tokens[0])
+        decoded["pv_temperature_c"] = parse_scalar(tokens[0])
     if len(tokens) > 1:
-        decoded["boost_temperature_c"] = parse_scalar(tokens[1])
+        decoded["inverter_temperature_c"] = parse_scalar(tokens[1])
     if len(tokens) > 2:
-        decoded["transformer_temperature_c"] = parse_scalar(tokens[2])
+        decoded["boost_temperature_c"] = parse_scalar(tokens[2])
     if len(tokens) > 3:
-        decoded["pv_temperature_c"] = parse_scalar(tokens[3])
+        decoded["transformer_temperature_c"] = parse_scalar(tokens[3])
     if len(tokens) > 4:
-        decoded["fan_1_speed_percent"] = parse_scalar(tokens[4])
+        decoded["max_temperature_c"] = parse_scalar(tokens[4])
     if len(tokens) > 5:
-        decoded["fan_2_speed_percent"] = parse_scalar(tokens[5])
+        decoded["fan_1_speed_percent"] = parse_scalar(tokens[5])
     if len(tokens) > 6:
-        decoded["max_temperature_c"] = parse_scalar(tokens[6])
+        decoded["fan_2_speed_percent"] = parse_scalar(tokens[6])
     if len(tokens) > 7:
         decoded["temperature_status_bits"] = tokens[7]
     return decoded
@@ -1796,6 +1795,241 @@ def decode_hbms3(payload: str) -> dict[str, Any]:
 def decode_heep(payload: str) -> dict[str, Any]:
     tokens = split_payload(payload)
     return {"raw_payload": payload, "tokens": tokens}
+
+
+# Reference implementation of the firmware's settings readback (components/solarplug/solarplug.cpp,
+# publish_write_states_from_*). Mapping evidence: docs/protocol/HEEP_SETTINGS_MAP.md.
+CHARGER_PRIORITY_CODES = {"0": "CSO", "1": "SNU", "2": "OSO", "3": "SOR"}
+OUTPUT_SOURCE_PRIORITY_CODES = {0: "SUB priority", 1: "SBU priority", 3: "PEC Mode (CT)"}  # 2 = SUF (grid feed), not offered
+BATTERY_TYPE_ENUM = ["AGM", "FLD", "USE", "LIA", "PYL", "TQF", "GRO", "LIB", "LIC", "FEL"]  # HEEP1[3] d2 / QPIRI[12] / PBT<NN>
+AC_INPUT_VOLTAGE_RANGE_CODES = {0: "Appliance", 1: "UPS"}
+OUTPUT_MODE_CODES = ["SIG", "PAL", "3P1", "3P2", "3P3"]  # POPM00..04 / HEEP1[8] / QPIRI[21]
+QFLAG_LETTERS = {
+    "a": "buzzer",
+    "b": "overload_bypass",
+    "j": "power_saving",
+    "k": "display_return_homepage",
+    "u": "overload_restart",
+    "v": "over_temperature_restart",
+    "x": "backlight",
+    "y": "input_source_detection_prompt_sound",
+    "z": "fault_code_record",
+}
+
+
+def _digit_flag(token: str, index: int) -> bool | None:
+    if index >= len(token) or token[index] not in "01":
+        return None
+    return token[index] == "1"
+
+
+def decode_heep1_settings(payload: str) -> dict[str, Any]:
+    tokens = split_payload(payload)
+    settings: dict[str, Any] = {}
+    if len(tokens) < 18:  # mirrors min_tokens_for("HEEP1"): truncated frames are dropped before decode
+        return settings
+    if len(tokens) > 3 and len(tokens[3]) == 11 and tokens[3].isdigit():
+        packed = tokens[3]
+        if packed[3] in "01":
+            settings["pv_energy_feeding_priority"] = "LBU" if packed[3] == "1" else "BLU"
+        for key, index in (
+            ("overload_restart", 4),
+            ("input_source_detection_prompt_sound", 5),
+            ("over_temperature_restart", 6),
+        ):
+            flag = _digit_flag(packed, index)
+            if flag is not None:
+                settings[key] = flag
+        if packed[1] in "01234":
+            settings["grid_protocol"] = f"Mode {int(packed[1]) + 1}"
+        flag = _digit_flag(packed, 7)
+        if flag is not None:
+            settings["ct_function"] = flag
+        settings["output_voltage"] = f"{packed[8:11]} V"
+    if len(tokens) > 4 and len(tokens[4]) == 3 and tokens[4].isdigit():
+        if tokens[4][0] in "01":
+            settings["output_frequency"] = "60 Hz" if tokens[4][0] == "1" else "50 Hz"
+        flag = _digit_flag(tokens[4], 1)
+        if flag is not None:
+            settings["display_return_homepage"] = flag
+        if tokens[4][2] in CHARGER_PRIORITY_CODES:
+            settings["charger_priority"] = CHARGER_PRIORITY_CODES[tokens[4][2]]
+    if len(tokens) > 8 and len(tokens[8]) == 1 and tokens[8] in "01234":
+        settings["output_mode"] = OUTPUT_MODE_CODES[int(tokens[8])]
+    for key, index in (("buzzer", 5), ("backlight", 6), ("overload_bypass", 7), ("bms_function_enable", 9),
+                       ("grid_feed", 18)):
+        if len(tokens) > index:
+            flag = _digit_flag(tokens[index], 0)
+            if flag is not None:
+                settings[key] = flag
+    if tokens and tokens[0] in ("0", "1"):
+        settings["output_source_priority"] = OUTPUT_SOURCE_PRIORITY_CODES[int(tokens[0])]
+    if len(tokens) > 3 and len(tokens[3]) == 11 and tokens[3].isdigit():
+        settings["ac_input_voltage_range"] = AC_INPUT_VOLTAGE_RANGE_CODES.get(int(tokens[3][0]))
+        settings["battery_type"] = BATTERY_TYPE_ENUM[int(tokens[3][2])]
+    return settings
+
+
+def decode_heep2_settings(payload: str) -> dict[str, Any]:
+    tokens = split_payload(payload)
+    settings: dict[str, Any] = {}
+    if tokens and tokens[0] in ("0", "1"):
+        settings["dual_output_mode"] = tokens[0] == "1"
+    for index, start_key, stop_key in ((11, "ac_charge_start_hour", "ac_charge_stop_hour"),
+                                       (12, "ac_output_start_hour", "ac_output_stop_hour")):
+        # Tentative "SSEE" layout (start hour, stop hour) until LCD experiment E1.
+        if len(tokens) > index and len(tokens[index]) == 4 and tokens[index].isdigit():
+            settings[start_key] = int(tokens[index][:2])
+            settings[stop_key] = int(tokens[index][2:])
+    if len(tokens) > 16 and len(tokens[16]) == 5 and tokens[16].isdigit():
+        settings["restore_second_output_battery_capacity"] = int(tokens[16][:2])
+    return settings
+
+
+# Status decodes mirrored from components/solarplug/solarplug.cpp (vendor tool TQF-AllInOne positions).
+HSTS_ALARM_LABELS = {
+    3: "Battery low", 4: "Battery not connected", 5: "Overload", 6: "Over temperature",
+    7: "EEPROM data error", 8: "EEPROM read/write error", 9: "PV power low", 10: "Input over voltage",
+    11: "Battery over voltage", 12: "Fan fault",
+}
+LED_STATES = {"0": "off", "1": "on", "2": "flashing"}
+HBMS1_FLAG_LABELS = [
+    "Communication OK", "Low battery alarm", "Low battery fault", "Charge allowed", "Discharge allowed",
+    "Charge over current", "Discharge over current", "Under temperature", "Over temperature",
+]
+
+
+FAULT_CODE_TEXT = {  # inverter manual 5.10.1 and 5.10.3; mirrors codec::fault_code_text
+    "00": "None", "01": "Fan locked while inverter off", "02": "Over temperature or NTC not connected",
+    "03": "Battery voltage too high", "04": "Battery voltage too low",
+    "05": "Output short circuit or converter over temperature", "06": "Output voltage too high",
+    "07": "Overload time out", "08": "Bus voltage too high", "09": "Bus soft start failed",
+    "51": "Over current or surge", "52": "Bus voltage too low", "53": "Inverter soft start failed",
+    "55": "Over DC voltage in AC output", "57": "Current sensor failed", "58": "Output voltage too low",
+    "59": "PV voltage over limit", "60": "BMS forbids charge and discharge", "61": "BMS communication lost",
+    "69": "BMS forbids charging", "70": "BMS requests charging", "71": "BMS forbids discharging",
+}
+
+
+def decode_hsts_status(payload: str) -> dict[str, Any]:
+    tokens = split_payload(payload)
+    out: dict[str, Any] = {}
+    if tokens and len(tokens[0]) == 2 and tokens[0].isdigit():
+        out["fault_code"] = tokens[0]
+        out["fault_description"] = FAULT_CODE_TEXT.get(tokens[0], f"Code {tokens[0]} (not in manual 5.10)")
+    if len(tokens) > 2 and len(tokens[1]) >= 13:
+        alarms = [HSTS_ALARM_LABELS[pos] for pos in range(3, 13) if tokens[1][pos] == "1"]
+        if len(tokens[2]) > 6:
+            if tokens[2][5] == "1":
+                alarms.append("BMS communication fault")
+            if tokens[2][6] == "1":
+                alarms.append("Temperature sensor fault")
+        out["alarms"] = ", ".join(alarms) if alarms else "None"
+    if len(tokens) > 2 and len(tokens[2]) >= 11:
+        t = tokens[2]
+        out["front_panel_leds"] = (
+            f"AC {LED_STATES.get(t[7], '?')}, inverter {LED_STATES.get(t[8], '?')}, "
+            f"charge {LED_STATES.get(t[9], '?')}, alarm {LED_STATES.get(t[10], '?')}"
+        )
+    if len(tokens) > 2 and len(tokens[2]) >= 5:
+        t = tokens[2]
+        out["grid_tie_state"] = {"0": "Off-grid", "1": "Waiting", "2": "Grid-tied"}.get(t[1], "Unknown")
+        out["main_output_relay"] = "On" if t[3] == "1" else "Off"
+        out["second_output"] = "On" if t[4] == "1" else "Off"
+        out["parallel_units"] = t[0]
+        out["parallel_role"] = t[2]
+    return out
+
+
+def decode_hbms1_status(payload: str) -> dict[str, Any]:
+    tokens = split_payload(payload)
+    out: dict[str, Any] = {}
+    if len(tokens) > 1 and len(tokens[1]) >= 9:
+        flags = [label for pos, label in enumerate(HBMS1_FLAG_LABELS) if tokens[1][pos] == "1"]
+        out["bms_flags_decoded"] = ", ".join(flags) if flags else "None"
+    if len(tokens) > 8 and tokens[8].isdigit() and 2000 < int(tokens[8]) < 3800:
+        out["bms_temperature_c"] = round((int(tokens[8]) - 2731.5) / 10.0, 2)
+    return out
+
+
+def decode_extra_fields(command: str, payload: str) -> dict[str, Any]:
+    """HOP inductor power, HTEMP fan enable, HIMSG1 integrity, HIMSG2 rated powers, HEEP2 discharge time,
+    HBAT charge switches."""
+    tokens = split_payload(payload)
+    out: dict[str, Any] = {}
+    if command == "HOP" and len(tokens) > 8 and tokens[8][:5].isdigit() and len(tokens[8]) >= 5:
+        out["inductor_power_w"] = int(tokens[8][:5])
+    elif command == "HTEMP" and len(tokens) > 7 and tokens[7][:1] in ("0", "1"):
+        out["fan_enable"] = "On" if tokens[7][0] == "1" else "Off"
+    elif command == "HIMSG1" and len(tokens) > 2 and tokens[2][:1] in ("0", "1"):
+        out["software_integrity"] = "Complete" if tokens[2][0] == "1" else "Incomplete"
+    elif command == "HIMSG2":
+        for index, key in enumerate(("rated_inverter_power_w", "rated_mppt_power_w", "rated_ac_power_w")):
+            if len(tokens) > index:
+                out[key] = parse_scalar(tokens[index])
+    elif command == "HEEP2":
+        if tokens and tokens[0] in ("0", "1"):
+            out["dual_output_mode"] = "On" if tokens[0] == "1" else "Off"
+        for index, key in ((11, "ac_charge_window_raw"), (12, "ac_output_window_raw"), (14, "output_timer_raw")):
+            if len(tokens) > index:
+                out[key] = tokens[index]
+        if len(tokens) > 16 and len(tokens[16]) == 5 and tokens[16].isdigit():
+            out["second_output_discharge_time_min"] = int(tokens[16][2:])
+    elif command == "HEEP3" and len(tokens) > 3 and len(tokens[3]) == 4 and tokens[3].isdigit():
+        out["ct_zero_adjust_power_w"] = tokens[3]  # unconfirmed on HPVINV02 (vendor: HPVINV07/08 EZCTP)
+    elif command == "HBAT" and len(tokens) > 6 and len(tokens[6]) >= 3:
+        sw = tokens[6]
+        out["charge_switches"] = (
+            f"Master {'on' if sw[0] == '1' else 'off'}, solar {'on' if sw[1] == '1' else 'off'}, "
+            f"AC {'on' if sw[2] == '1' else 'off'}"
+        )
+    return out
+
+
+def decode_qpiri_settings(payload: str) -> dict[str, Any]:
+    tokens = split_payload(payload)
+    settings: dict[str, Any] = {}
+    if len(tokens) < 18:
+        return settings
+    for key, index, table in (
+        ("ac_input_voltage_range", 15, AC_INPUT_VOLTAGE_RANGE_CODES),
+        ("output_source_priority", 16, OUTPUT_SOURCE_PRIORITY_CODES),
+    ):
+        if tokens[index].isdigit() and int(tokens[index]) in table:
+            settings[key] = table[int(tokens[index])]
+    if tokens[17].isdigit() and str(int(tokens[17])) in CHARGER_PRIORITY_CODES:
+        settings["charger_priority"] = CHARGER_PRIORITY_CODES[str(int(tokens[17]))]
+    # Cross-check readings (HEEP1 is primary for these).
+    try:
+        settings["output_voltage"] = f"{int(float(tokens[2]) + 0.5):03d} V"
+    except ValueError:
+        pass
+    if tokens[3] in ("50.0", "60.0"):
+        settings["output_frequency"] = f"{tokens[3][:2]} Hz"
+    if len(tokens) > 21 and tokens[21].isdigit() and int(tokens[21]) <= 4:
+        settings["output_mode"] = OUTPUT_MODE_CODES[int(tokens[21])]
+    return settings
+
+
+def decode_qflag_settings(payload: str) -> dict[str, bool]:
+    tokens = split_payload(payload)
+    settings: dict[str, bool] = {}
+    if not tokens or not tokens[0].startswith("E"):
+        return settings
+    enabled = True
+    for char in tokens[0]:
+        if char in "ED":
+            enabled = char == "E"
+        elif char in QFLAG_LETTERS:
+            settings[QFLAG_LETTERS[char]] = enabled
+    return settings
+
+
+def decode_qbeqi_settings(payload: str) -> dict[str, bool]:
+    tokens = split_payload(payload)
+    if tokens and tokens[0] in "01" and len(tokens[0]) == 1:
+        return {"battery_equalization_mode_enable": tokens[0] == "1"}
+    return {}
 
 
 def decode_hpvb(payload: str) -> dict[str, Any]:
@@ -2497,13 +2731,13 @@ FIELD_METADATA: dict[str, dict[str, dict[str, Any]]] = {
         "heep1_token_6_effect": {"unit": None, "confidence": "high", "raw_index": 0},
     },
     "HTEMP": {
-        "inverter_temperature_c": {"unit": "C", "confidence": "high", "raw_index": 0},
-        "boost_temperature_c": {"unit": "C", "confidence": "high", "raw_index": 1},
-        "transformer_temperature_c": {"unit": "C", "confidence": "high", "raw_index": 2},
-        "pv_temperature_c": {"unit": "C", "confidence": "high", "raw_index": 3},
-        "fan_1_speed_percent": {"unit": "%", "confidence": "high", "raw_index": 4},
-        "fan_2_speed_percent": {"unit": "%", "confidence": "high", "raw_index": 5},
-        "max_temperature_c": {"unit": "C", "confidence": "high", "raw_index": 6},
+        "pv_temperature_c": {"unit": "C", "confidence": "high", "raw_index": 0},
+        "inverter_temperature_c": {"unit": "C", "confidence": "high", "raw_index": 1},
+        "boost_temperature_c": {"unit": "C", "confidence": "high", "raw_index": 2},
+        "transformer_temperature_c": {"unit": "C", "confidence": "high", "raw_index": 3},
+        "max_temperature_c": {"unit": "C", "confidence": "high", "raw_index": 4},
+        "fan_1_speed_percent": {"unit": "%", "confidence": "high", "raw_index": 5},
+        "fan_2_speed_percent": {"unit": "%", "confidence": "high", "raw_index": 6},
         "temperature_status_bits": {"unit": None, "confidence": "high", "raw_index": 7},
     },
     "HGEN": {

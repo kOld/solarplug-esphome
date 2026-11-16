@@ -4,7 +4,7 @@ This project targets the Solar Plug / Solar of Things RS232 telemetry path used 
 
 Compatibility is tracked in three tiers:
 
-- **Confirmed**: local active read-only replacement has been tested against the inverter.
+- **Confirmed**: the local active replacement has been tested against the inverter.
 - **Likely compatible**: the inverter is listed by the same dongle/vendor compatibility surface, but no local capture has been submitted yet.
 - **Research lead**: public references suggest the same dongle/protocol family, but evidence is weaker.
 
@@ -12,7 +12,7 @@ Compatibility is tracked in three tiers:
 
 | Brand | Inverter model | Wi-Fi dongle | Solar of Things type | Firmware/software | Status |
 |---|---|---|---|---|---|
-| PowMr / MrPow | `POW-HVM6.2KP` | `WIFI-RELAB` | `HPVINV02` | `40.05` | confirmed read-only H-protocol replacement |
+| PowMr / MrPow | `POW-HVM6.2KP` | `WIFI-RELAB` | `HPVINV02` | `40.05` | confirmed H-protocol replacement; most beta writes round-trip verified (WRITE_TEST_LEDGER.md) |
 
 Confirmed local identity:
 
@@ -42,8 +42,7 @@ The sniffer source dongle for this project is `WIFI-RELAB`. The compatibility li
 
 | Family | Confirmed model(s) | Known working command set | Notes |
 |---|---|---|---|
-| `HPVINV02` / `VMII-6200` path | `POW-HVM6.2KP` | `HSTS`, `HGRID`, `HOP`, `HBAT`, `HPV`, `HTEMP`, `HGEN`, `QPRTL`, `HIMSG1` | v1 production read telemetry |
-| `HPVINV02` / `VMII-6200` path | `POW-HVM6.2KP` | `HBMS1`, `HBMS2`, `HBMS3`, `HEEP1`, `HEEP2`, `HPVB` | diagnostic/default-disabled in v1 |
+| `HPVINV02` / `VMII-6200` path | `POW-HVM6.2KP` (fw 40.05) | every polled command in the tiers of [../COMPONENT_DESIGN.md](../COMPONENT_DESIGN.md#poll-tiers), plus the setters in [HEEP_SETTINGS_MAP.md](HEEP_SETTINGS_MAP.md) | telemetry, settings readback, beta writes, response CRC |
 | `WIFI-RELAB` listed models | models listed above | unknown until captured | likely same family, but do not mark supported without evidence |
 
 ## Research Leads, Not Yet Confirmed

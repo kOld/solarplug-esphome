@@ -1,8 +1,6 @@
 # Write Surface
 
-This is the canonical public summary of the writable Solar Plug surface observed during local bus research.
-
-Writes are documented for protocol completeness. The default v1 ESPHome replacement build remains read-only. A separate lab build can expose a small opt-in write surface for controlled validation on a real inverter.
+This file keeps the bus-capture history of every setter family and the reasons for the unsafe profile. The per-control reference (frame, range, readback slot, evidence class, default state) is [HEEP_SETTINGS_MAP.md](HEEP_SETTINGS_MAP.md), and [WRITE_TEST_LEDGER.md](WRITE_TEST_LEDGER.md) records each round-trip.
 
 Response frames begin with `(`. Raw ACK/NAK frames include response CRC bytes before `0D`: `(ACK9 ` decodes as payload `(ACK` plus CRC `39 20`, and `(NAKss` decodes as payload `(NAK` plus CRC `73 73`.
 
@@ -31,147 +29,87 @@ Response frames begin with `(`. Raw ACK/NAK frames include response CRC bytes be
 | Battery Equalization Time Setting | `PBEQT<DDD>` | `(ACK9 ` | readback-confirmed on `HEEP2[8]` |
 | Battery Equalization Mode Enable Setting | `PBEQE1` / `PBEQE0Z2` | `(ACK9 ` | confirmed |
 | Maximum Charging Current Setting | `MNCHGC<DDD>` | `(ACK9 ` | readback-confirmed on `HEEP1[1]` |
-| Output Source Priority Setting | `POP00` / `POP01` / `POP02` | `(ACK9 ` | live write family; `POP00` raw frame is pinned, and the current best mapping is `POP00` = `SUB priority`, `POP01` = `SBU priority`, `POP02` = `Utility first (legacy)` |
-| Charger Priority Setting | `PCP00` / `PCP01` / `PCP02` | `(ACK9 ` | bus-confirmed; latest live round-trip captured `PCP01` on `OSO -> SNU`, `PCP02` on `SNU -> OSO`, `PCP00` on `OSO -> CSO`, and `PCP02` again on `CSO -> OSO`; current best mapping is `PCP00` = `CSO`, `PCP01` = `SNU`, `PCP02` = `OSO`, and `PCP02` is shared by both restore windows; `PCP03` remains unconfirmed |
-| PV Energy Feeding Priority Setting | `PVENGUSE00` / `PVENGUSE01` | `(ACK9 ` | live write family; current best mapping is `PVENGUSE00` = `BLU`, `PVENGUSE01` = `LBU`; `PVENGUSE02` remains unconfirmed |
-| Restore Second Output Battery Capacity Setting | `PDSRS<DDD>` | `ACK` / `NAK` on range probes | family shape confirmed |
-| Restore Second Output Delay Time Setting | `PDDLYT<DDD>` | `ACK` / `NAK` on range probes | family shape confirmed |
+| Output Source Priority Setting | `POP00` / `POP01` | `(ACK9 ` | `POP00` = `SUB priority` (captured on the wire when the portal moved SBU→SUB). `POP01` = `SBU priority` is inferred from the code order and has **not** been captured on the wire. Readback: `QPIRI[16]` (and `QOP`) read `1` on 2026-04-25, and the portal showed SBU on 2026-04-29. `POP02` is not offered by the manual and remains unconfirmed |
+| Charger Priority Setting | `PCP00` / `PCP01` / `PCP02` | `(ACK9 ` | bus-confirmed; latest live round-trip captured `PCP01` on `OSO -> SNU`, `PCP02` on `SNU -> OSO`, `PCP00` on `OSO -> CSO`, and `PCP02` again on `CSO -> OSO`; `PCP00` = `CSO`, `PCP01` = `SNU`, `PCP02` = `OSO`, readback-confirmed on `HEEP1[4]` last digit and `QPIRI[17]` (`PCP00` → `010`, `PCP02` → `012` on 2026-11-16); `PCP03` remains unconfirmed |
+| PV Energy Feeding Priority Setting | `PVENGUSE00` / `PVENGUSE01` | `(ACK9 ` | readback-confirmed on `HEEP1[3]` digit 3: `PVENGUSE00` = `BLU`, `PVENGUSE01` = `LBU`; `PVENGUSE02` remains unconfirmed |
+| Restore Second Output Battery Capacity Setting | `PDSRS<DDD>` | `(ACK9 ` | readback-confirmed on `HEEP2[16]` d0–1 (`30000 → 35000 → 30000`); multiples of 5 only |
+| Restore Second Output Delay Time Setting | `PDDLYT<DDD>` | `ACK` / `NAK` on range probes | `005` ACK, `004`/`006` NAK; `HEEP2[13]` matches the stored value |
+| SOC Back To Mains / Battery, Inverter Restart SOC (programs 39–41) | `BMSB2UC` / `BMSU2BC` / `BMSSRC<DDD>` | `(ACK9 ` | readback-confirmed on `HEEP1[11]`/`[12]`/`[13]` (2026-11-16) |
+| Second Output Cut-off SOC (program 62) | `PDSDS<DDD>` | `(ACK9 ` | readback-confirmed on `HEEP2[2]` (2026-11-16) |
+| Low Battery Alarm V, Second Output Cut-off / Recovery V (programs 24, 61, 63) | `PSLV` / `PDSDV` / `PDSRV<XX.X>` | `(NAKss` | NAK even at the current value with a lithium battery type (2026-11-16); unsafe profile only |
 
-## Bus-Observed Low-Risk Families
-
-These rows have live wire evidence, but the tested values are not yet a clean accepted round-trip:
+## Bus-Observed Rejections
 
 | Portal label | Bus family | Observed response | Current status |
 |---|---|---|---|
-| Battery Float Charging Voltage Setting | `PBFT<XX.X>` | `(NAKss` | bus frame observed; tested `56.5 V`, `56.4 V`, and `56.3 V` deltas rejected |
-The same write surface also includes the select families above. The current best mapping is now stable enough to expose in the beta firmware:
+| Battery Float Charging Voltage Setting | `PBFT<XX.X>` | `(NAKss` | tested `56.5 V`, `56.4 V` and `56.3 V` rejected; unsafe profile only |
+| Battery Constant Charging Voltage Setting | `PCVV<XX.X>` | — | never sent on the bus; unsafe profile only |
 
-- `chargerPrioritySetting` -> `PCP00` / `PCP01` / `PCP02`
-- `outputSourcePrioritySetting` -> `POP00` / `POP01` / `POP02`
-- `pvEnergyFeedingPrioritySetting` -> `PVENGUSE00` / `PVENGUSE01`
+## Portal Rows and the Cloud
 
-## Portal Rows Not Productized
+The Solar of Things cloud answers `Command not supported` for several rows that the firmware accepts on the bus, so the limit is in the cloud. Programs 39–41, 62 and 65 work (`BMSB2UC`, `BMSU2BC`, `BMSSRC`, `PDSDS`, `PDDCGT<DDDD>`), and 24, 61 and 63 NAK (`PSLV`, `PDSDV`, `PDSRV`).
 
-These rows are useful research targets but are not production controls:
+The portal's topology and grid rows are encodable only in the unsafe profile (table below), from the vendor tool's formats: grid connection, grid protocol, output mode (which also covers parallel and 3-phase operation), rated frequency and rated voltage. The portal's "INV Dual Output Time" most likely matches program 65, the beta `second_output_discharge_time`.
 
-- Battery Constant Charging Voltage Setting
+## Gating
 
-The legacy pipsolar family for this row is `PCVV<XX.X>`, but the current portal write path on this firmware returns `Command not supported`, so it remains portal-only until a live bus round-trip is proven.
+- **Entity creation:** write entities exist only with `enable_writes: true`, `passive_mode: false` and `write_profile: beta` or `unsafe`. The `sync_clock` button and the `probe_write` action need only the first two.
+- **Encoders:** each entity maps to one fixed encoder in `components/solarplug/solarplug_writes.cpp`. There is no arbitrary command sender; the `probe_write` action accepts only `HOSTCRCEN` / `HOSTCRCDN`.
+- **Beta profile:** it holds the controls with bus evidence on this unit. The exceptions are `power_saving` (never sent, disabled by default) and `POP01` (never seen on the wire). The evidence per control is in [HEEP_SETTINGS_MAP.md](HEEP_SETTINGS_MAP.md).
 
-The low-risk queue is now exhausted on this firmware. The following portal rows were probed and rejected with `Command not supported`, so they should stay out of the lab queue:
+NAK-only, never-sent and output-cutting controls need `write_profile: unsafe`, which config validation enforces. They live in `packages/solarplug-write-unsafe.yaml`, where every entity is disabled by default:
 
-- `lowBatteryAlarmVoltageSetting`
-- `parallelShutdownBatteryVoltageSetting`
-- `restoreBatteryDischargingBatteryCapacity`
-- `restoreMainsChargingBatteryCapacity`
-- `secondOutputDischargeTimeSetting`
+| Entity key | Domain | Frame | Why it is unsafe |
+|---|---|---|---|
+| `battery_cut_off_voltage`, `battery_bulk_voltage`, `battery_float_voltage` | number | `PSDV` / `PCVV` / `PBFT<XX.X>` | NAK with a lithium battery type (`PCVV` never sent) |
+| `low_battery_alarm_voltage`, `second_output_cutoff_voltage`, `second_output_recovery_voltage` | number | `PSLV` / `PDSDV` / `PDSRV<XX.X>` | NAK even at the current value (2026-11-16) |
+| `dual_output_mode` | switch | `PDAULC01` / `PDAULC00` | never sent; `HEEP2[0]` polarity unconfirmed (LCD program 60) |
+| `second_output_power` | switch | `PDAULON01` / `PDAULON00` | switches the L2 loads immediately; never sent |
+| `grid_feed` | switch | `GRIDFEED01` / `GRIDFEED00` | grid export; never sent |
+| `ct_function` | switch | `EXTCT01` / `EXTCT00` | needs a CT clamp; never sent |
+| `output_frequency` | select | `F50` / `F60` | can damage loads; never sent |
+| `output_voltage` | select | `V220` / `V230` / `V240` | never sent |
+| `output_mode` | select | `POPM00`–`04` | PAL/3P* on a single unit can stop the output; never sent |
+| `grid_protocol` | select | `^S???RS00`–`04` (Mode 1–5) | grid-compliance setting; never sent |
+| `ac_charge_start_hour` / `_stop_hour` | number | `^S???ACCT<HH>-<HH>` | vendor format only; readback layout of `HEEP2[11]` tentative |
+| `ac_output_start_hour` / `_stop_hour` | number | `^S???ACLT<HH>-<HH>` | can switch the AC output off for part of the day; `HEEP2[12]` tentative |
 
-Grouped from the portal matrix, the still-unpromoted rows are:
-
-- BMS Lock Machine Battery Capacity (%)
-- Grid Connection Function Enable Setting
-- Grid Connection Protocol Type Setting
-- Grid Working Range Setting
-- INV Dual Output Time
-- Output Model Setting
-- Overload To Bypass Operation
-- Parallel Mode Setting
-- Rated Frequency Setting
-- Rated Voltage Setting
-
-These remaining rows are topology or source-priority controls and are passive-only for this pass.
-
-`batteryRechargeVoltageSetting` and `batteryRedischargeVoltageSetting` are now promoted on this firmware and map to `PBCV<XX.X>` / `PBDV<XX.X>`.
-
-`POP` is now a live-observed write family for `Output Source Priority Setting`. The current best mapping is `POP00` = `SUB priority`, `POP01` = `SBU priority`, and `POP02` = `Utility first (legacy)`. The raw `POP00` frame is pinned; keep `POP01` and `POP02` paired with the decoder until a separate isolated raw replay is captured for each one.
-
-`PVENGUSE` is now a live-observed write family for `PV Energy Feeding Priority Setting`. The live bus capture paired `PVENGUSE00^a` with `BLU` and `PVENGUSE01N@` with `LBU`; both returned `(ACK9 `, and the current best mapping is `PVENGUSE00` = `BLU` and `PVENGUSE01` = `LBU`. Keep the family label and mapping together in the decoder until a cleaner raw-byte replay is written out.
-
-## ESPHome Beta Write Surface
-
-The ESPHome component will not create write entities unless both conditions are true:
-
-- `enable_writes: true`
-- `passive_mode: false`
-- `write_profile: beta` for bus-confirmed controls, or `write_profile: unsafe` for NAK-only / unsupported research probes
-
-The beta write surface intentionally has no arbitrary command sender. Each entity maps to one bus-confirmed encoder:
-
-| Entity key | ESPHome domain | Encoded frame |
-|---|---|---|
-| `buzzer` | switch | off `PDa`; on `PEa` |
-| `backlight` | switch | off ``PDx`Y``; on `PExSh` |
-| `display_return_homepage` | switch | off `PDk`; on `PEkq:` |
-| `over_temperature_restart` | switch | off `PDv`; on `PEv` |
-| `overload_restart` | switch | off `PDu`; on `PEu` |
-| `input_source_detection_prompt_sound` | switch | off `PDypx`; on `PEyCI` |
-| `battery_equalization_voltage` | number | `PBEQV<XX.XX>`; range `48.0`-`60.0 V` |
-| `battery_recharge_voltage` | number | `PBCV<XX.X>`; observed `45.0` / `46.0` round-trip on live bus |
-| `battery_redischarge_voltage` | number | `PBDV<XX.X>`; observed `53.0` / `54.0` round-trip on live bus |
-| `battery_equalization_interval` | number | `PBEQP<DDD>`; manual range `0`-`90 days`; 1-day step |
-| `battery_equalization_timeout` | number | `PBEQOT<DDD>`; manual range `5`-`900 min`; 5-minute step |
-| `grid_connected_current` | number | `PGFC<DDD>`; observed `20 A` and `21 A` in the live round-trip |
-| `maximum_mains_charging_current` | number | `MUCHGC<DDD>`; observed `20 A` and `30 A` in the live round-trip |
-| `maximum_charging_current` | number | `MNCHGC<DDD>`; manual model maximum `120 A`; observed `50 A`, `60 A`, `70 A`, and `80 A` in live round-trips |
-| `battery_equalization_time` | number | `PBEQT<DDD>`; manual range `5`-`900 min`; 5-minute step |
-| `battery_equalization_mode_enable` | switch | off `PBEQE0Z2`; on `PBEQE1` |
-| `restore_second_output_battery_capacity` | number | `PDSRS<DDD>`; range `0`-`50 %` |
-| `restore_second_output_delay_time` | number | `PDDLYT<DDD>`; manual range `0`-`60 min`; 5-minute step; `4 min` was rejected on this firmware |
-| `charger_priority` | select | `PCP00` = `CSO`, `PCP01` = `SNU`, `PCP02` = `OSO` |
-| `output_source_priority` | select | `POP00` = `SUB priority`, `POP01` = `SBU priority`, `POP02` = `Utility first (legacy)` |
-| `pv_energy_feeding_priority` | select | `PVENGUSE00` = `BLU`, `PVENGUSE01` = `LBU` |
-
-The beta write firmware publishes the requested switch/number/select state after a write is accepted into the command queue, and then exposes the actual bus result through `last_write_status`. Treat the requested state as optimistic until `last_write_status` reports `ack` and a fresh readback poll confirms the relevant `HEEP1` or `HEEP2` token. Use one change at a time and restore values after each probe.
+`^S???` setters may answer `^1` (accepted) or `^0` (rejected); `^0` is reported as `nak`.
 
 ## Manual Cross-Check
 
-The local POW-HVM6.2KP manual supports the tighter beta ranges used by the component:
+The POW-HVM6.2KP manual's ranges, as the component enforces them. The parity test checks that every value an entity offers is accepted by its encoder, given a valid ordering against the other SOC thresholds.
 
-| Manual program | Manual setting | Component entity | Manual constraint used |
+| Manual program | Manual setting | Component entity | Constraint |
 |---:|---|---|---|
-| 02 | Maximum charging current | `maximum_charging_current` | 10 A steps up to the model maximum charging current; model rating lists `120 A`. |
-| 11 | Maximum utility charging current | `maximum_mains_charging_current` | `2 A`, then 10 A steps up to max AC charging current; the live inverter option list currently tops out at `60 A`. |
-| 12 | Back to utility voltage | `battery_recharge_voltage` | `44 V`-`51 V`, 1 V step. |
-| 13 | Back to battery voltage | `battery_redischarge_voltage` | full-charge option or `48 V`-`58 V`, 1 V step; component keeps `0` as the full-charge sentinel. |
-| 31 | Battery equalization voltage | `battery_equalization_voltage` | `48.0 V`-`60.0 V`, 0.1 V step. |
-| 33 | Battery equalized time | `battery_equalization_time` | `5`-`900 min`, 5-minute step. |
-| 34 | Battery equalized timeout | `battery_equalization_timeout` | `5`-`900 min`, 5-minute step. |
-| 35 | Equalization interval | `battery_equalization_interval` | `0`-`90 days`, 1-day step. |
-| 56 | GRID-tie current | `grid_connected_current` | 1 A step; current tested value restored to `20 A`. |
-| 66 | Dual Recover Delay Time | `restore_second_output_delay_time` | `0`-`60 min`; `PDDLYT004` NAK matches the manual's 5-minute stepping behavior. |
+| 02 | Maximum charging current | `maximum_charging_current` (select) | The options are the unit's `QMCHGCR` list, `10`–`80 A` (the manual's `120 A` is the model-family figure). |
+| 11 | Maximum utility charging current | `maximum_mains_charging_current` (select) | `2 A`, then `10`–`60 A` in 10 A steps (`QMUCHGCR`). |
+| 12 | Back to utility voltage | `battery_recharge_voltage` | `44`–`51 V`, 1 V step. |
+| 13 | Back to battery voltage | `battery_redischarge_voltage` (select) | `Full` (sent as `PBDV00.0`) or `48`–`58 V`. |
+| 31 | Battery equalization voltage | `battery_equalization_voltage` | `48.0`–`60.0 V`. |
+| 33 / 34 | Equalized time / timeout | `battery_equalization_time` / `_timeout` | `5`–`900 min`, 5-minute step. |
+| 35 | Equalization interval | `battery_equalization_interval` | `0`–`90 days`. |
+| 56 | GRID-tie current | `grid_connected_current` | 1 A step; capped at 30 A near the 26.9 A rating. |
+| 66 | Dual recover delay | `restore_second_output_delay_time` | `0`–`60 min`, 5-minute step (`PDDLYT004` and `006` NAK). |
 
-NAK-only or unsupported rows are excluded from the normal beta profile. The component still keeps explicit unsafe encoders for focused research, but `battery_cut_off_voltage`, `battery_float_voltage`, and `battery_bulk_voltage` require `write_profile: unsafe` and should not be enabled on the normal beta firmware.
+Both charge currents and the back-to-battery voltage were sliders that offered values the inverter rejects. They are selects now. The charge-current options are rebuilt from the inverter's own lists once two identical replies agree, and stored in flash. A list can only narrow the model envelope.
 
-Live decoder verification on 2026-05-01 confirmed the `display_return_homepage` disable wire form as `50 44 6B 42 0B 0D` and the restore wire form as `50 45 6B 71 3A 0D`, both with `(ACK9 ` responses.
-Live decoder verification on 2026-05-01 also confirmed the binary equalization mode row: `PBEQE1` on the wire as `50 42 45 51 45 31 4A 13 0D` and `PBEQE0Z2` as `50 42 45 51 45 30 5A 32 0D`, both with `(ACK9 ` responses. The portal snapshot renders this row as `Off` / `On`.
+## Wire Notes
 
-## Safety Policy
+- On 2026-05-01, `display_return_homepage` was sent as `50 44 6B 42 0B 0D` (off) and `50 45 6B 71 3A 0D` (on); both were answered `(ACK9 `.
+- `PBEQE1` goes on the wire as `50 42 45 51 45 31 4A 13 0D` and `PBEQE0` as `50 42 45 51 45 30 5A 32 0D`.
 
-The production examples exclude all write families:
+## Examples and Profiles
 
-- `PD*`
-- `PE*`
-- `PBEQV*`
-- `PBCV*`
-- `PBDV*`
-- `PCVV*`
-- `PBFT*`
-- `PSDV*`
-- `PDSRS*`
-- `PBEQOT*`
-- `PBEQT*`
-- `PDDLYT*`
-- `^S???DAT*`
-- `PCPxx`
-- `POPxx`
-- `PVENGUSExx`
-- unknown `P*` setters
-
-Write support should stay opt-in and beta-scoped until each control has repeated ACK/restore evidence and a documented readback path across more inverter units.
+| Example | Package | Sends |
+|---|---|---|
+| `minimal-passive-sniffer.yaml` | passive sniffer | nothing |
+| `active-reader.yaml` | minimal reader | read queries only |
+| `atom-s3-lite-replacement.yaml` | full reader | read queries plus the `HOSTCRCEN` keep-alive (`response_crc: true`), no setters |
+| `atom-s3-lite-write-beta.yaml` | full reader + write beta | the above plus the beta setters |
 
 ## Related Docs
 
+- [HEEP_SETTINGS_MAP.md](HEEP_SETTINGS_MAP.md)
 - [H_COMMANDS.md](H_COMMANDS.md)
-- [CURRENT_FIELD_STATUS.md](CURRENT_FIELD_STATUS.md)
 - [WRITE_TEST_LEDGER.md](WRITE_TEST_LEDGER.md)
-- [REPLAY_WORKFLOW.md](REPLAY_WORKFLOW.md)

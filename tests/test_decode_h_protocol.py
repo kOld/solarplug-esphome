@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import re
 import subprocess
 import sys
@@ -506,8 +507,8 @@ class DecodeHProtocolTest(unittest.TestCase):
         self.assertTrue(equalization_mode_disable["ack_observed"])
 
         hbat = self.module.decode_hbat("(04 053.5 080 002 00000 394 101002010000 00000000")
-        self.assertEqual(hbat["battery_type_code"], "04")
-        self.assertEqual(hbat["battery_type"], "PYL")
+        self.assertEqual(hbat["battery_series_count"], 4)
+        self.assertNotIn("battery_type", hbat)
 
         hpvb = self.module.decode_hpvb("(000.0 00.0 00000 0 380.0 000000000000000000000")
         hpvb_meta = self.module.build_decoded_field_metadata("HPVB", hpvb)
@@ -821,6 +822,148 @@ class DecodeHProtocolTest(unittest.TestCase):
             self.assertIn("decoded_fields", first_pair)
             self.assertIn("status_code", first_pair["decoded_fields"])
 
+    def test_heep1_settings_readback_matches_portal_and_write_deltas(self) -> None:
+        tail = " 1 020 025 090 050 056.4 056.4 042.0 020 0 0"
+        # 2026-04-29 baseline; portal: PV LBU, overload restart off, prompt sound on, over-temp restart on,
+        # display return on, charger OSO, buzzer on, backlight on.
+        baseline = self.module.decode_heep1_settings("(1 060 030 03410110230 012 1 1 0 0" + tail)
+        self.assertEqual(
+            baseline,
+            {
+                "pv_energy_feeding_priority": "LBU",
+                "overload_restart": False,
+                "input_source_detection_prompt_sound": True,
+                "over_temperature_restart": True,
+                "display_return_homepage": True,
+                "charger_priority": "OSO",
+                "buzzer": True,
+                "backlight": True,
+                "overload_bypass": False,
+                "bms_function_enable": True,
+                "output_source_priority": "SBU priority",
+                "ac_input_voltage_range": "Appliance",
+                "battery_type": "PYL",
+                # Unsafe-profile controls seeded from the same frame.
+                "grid_protocol": "Mode 4",
+                "ct_function": False,
+                "output_voltage": "230 V",
+                "output_frequency": "50 Hz",
+                "output_mode": "SIG",
+                "grid_feed": False,
+            },
+        )
+        # One-setting deltas captured on the bus (command -> HEEP1 change).
+        cases = {
+            "PDa": ("(1 060 030 03410110230 012 0 1 0 0" + tail, "buzzer", False),
+            "PDx`Y": ("(1 060 030 03410110230 012 1 0 0 0" + tail, "backlight", False),
+            "PDk": ("(1 060 030 03410110230 002 1 1 0 0" + tail, "display_return_homepage", False),
+            "PDv": ("(1 060 030 03410100230 012 1 1 0 0" + tail, "over_temperature_restart", False),
+            "PDypx": ("(1 060 030 03410010230 012 1 1 0 0" + tail, "input_source_detection_prompt_sound", False),
+            "PVENGUSE00": ("(1 060 030 03400010230 012 1 1 0 0" + tail, "pv_energy_feeding_priority", "BLU"),
+            "PCP00": ("(1 080 030 03311010230 010 1 1 0 0" + tail, "charger_priority", "CSO"),
+            "PCP01": ("(1 060 030 03410110230 011 1 1 0 0" + tail, "charger_priority", "SNU"),
+            "PEu": ("(1 080 030 03311010230 012 1 1 0 0" + tail, "overload_restart", True),
+        }
+        for command, (payload, key, expected) in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(self.module.decode_heep1_settings(payload)[key], expected)
+        self.assertEqual(self.module.decode_heep1_settings("(1 060 030 0341x110230 0x2"), {})
+
+    def test_heep1_live_2026_11_16_battery_type_and_cross_checks(self) -> None:
+        live = "(1 080 030 03311010230 012 1 1 0 0 1 020 025 040 050 056.4 056.4 042.0 020 0 0"
+        settings = self.module.decode_heep1_settings(live)
+        # Digit 2 = 3 = LIA in the shared enum; QPIRI[12] read 3 in the same poll.
+        self.assertEqual(settings["battery_type"], "LIA")
+        # Cross-checks against independent readbacks in the same poll:
+        # QPIRI[16]=1 (SBU), QPIRI[15]=0, QFLAG "EakuvxDbjyz" (b off, u/v on, y off).
+        self.assertEqual(settings["output_source_priority"], "SBU priority")
+        self.assertEqual(settings["ac_input_voltage_range"], "Appliance")
+        self.assertFalse(settings["overload_bypass"])
+        self.assertTrue(settings["overload_restart"])
+        self.assertTrue(settings["over_temperature_restart"])
+        self.assertFalse(settings["input_source_detection_prompt_sound"])
+        qflag = self.module.decode_qflag_settings("(EakuvxDbjyz")
+        for key in ("buzzer", "backlight", "display_return_homepage", "overload_restart",
+                    "over_temperature_restart", "input_source_detection_prompt_sound", "overload_bypass"):
+            with self.subTest(key=key):
+                self.assertEqual(settings[key], qflag[key])
+
+    def test_htemp_order_matches_portal_snapshot(self) -> None:
+        # 2026-04-29 portal: PV 20, inverter 28, boost 21, transformer 26, max 28, fans 30 %.
+        htemp = self.module.decode_htemp("(020 028 021 026 028 030 030 11000000000000000000")
+        self.assertEqual(htemp["pv_temperature_c"], 20)
+        self.assertEqual(htemp["inverter_temperature_c"], 28)
+        self.assertEqual(htemp["boost_temperature_c"], 21)
+        self.assertEqual(htemp["transformer_temperature_c"], 26)
+        self.assertEqual(htemp["max_temperature_c"], 28)
+        self.assertEqual(htemp["fan_1_speed_percent"], 30)
+        self.assertEqual(htemp["fan_2_speed_percent"], 30)
+
+    def test_heep2_restore_second_output_capacity(self) -> None:
+        head = "(0 044.0 020 044.0 046.0 054.0 0 058.4 060 120 030 0000 0000 10 0000 52.0 "
+        # PDSRS035 then PDSRS030 on 2026-11-16 moved token 16 30000 -> 35000 -> 30000.
+        base = {"dual_output_mode": False, "ac_charge_start_hour": 0, "ac_charge_stop_hour": 0,
+                "ac_output_start_hour": 0, "ac_output_stop_hour": 0}
+        self.assertEqual(self.module.decode_heep2_settings(head + "35000"),
+                         {**base, "restore_second_output_battery_capacity": 35})
+        self.assertEqual(self.module.decode_heep2_settings(head + "30000"),
+                         {**base, "restore_second_output_battery_capacity": 30})
+        self.assertEqual(self.module.decode_heep2_settings(head + "3x000"), base)
+
+    def test_status_decodes_from_vendor_positions(self) -> None:
+        # April capture (line mode) and today's token 2 (battery mode, off-grid).
+        april = self.module.decode_hsts_status("(00 L010000000000 11211001000L112000000")
+        self.assertEqual(april["fault_code"], "00")
+        self.assertEqual(april["alarms"], "None")
+        self.assertEqual(april["grid_tie_state"], "Waiting")
+        self.assertEqual(april["front_panel_leds"], "AC on, inverter off, charge off, alarm off")
+        today = self.module.decode_hsts_status("(00 B010000000000 10211002120B117200000")
+        self.assertEqual(today["grid_tie_state"], "Off-grid")
+        self.assertEqual(today["main_output_relay"], "On")
+        self.assertEqual(today["second_output"], "On")
+        self.assertEqual(today["front_panel_leds"], "AC flashing, inverter on, charge flashing, alarm off")
+        # Synthetic: token1 pos3 (battery low), pos5 (overload), pos12 (fan); token2 pos5 (BMS comm fault).
+        alarm = self.module.decode_hsts_status("(05 B011010000001 10211102120B117200000")
+        self.assertEqual(alarm["alarms"], "Battery low, Overload, Fan fault, BMS communication fault")
+        bms = self.module.decode_hbms1_status("(02 1001100000000000 044.8 057.6 150.0 028 0001.6 0000.0 02929 000000")
+        self.assertEqual(bms["bms_flags_decoded"], "Communication OK, Charge allowed, Discharge allowed")
+        self.assertEqual(bms["bms_temperature_c"], 19.75)
+        extra = self.module.decode_extra_fields
+        self.assertEqual(extra("HOP", "(242.0 49.9 00532 00529 008 000 06200 005.9 00102")["inductor_power_w"], 102)
+        self.assertEqual(extra("HTEMP", "(020 028 021 026 028 030 030 11000000000000000000")["fan_enable"], "On")
+        self.assertEqual(extra("HIMSG1", "(0040.05 20250923 12")["software_integrity"], "Complete")
+        self.assertEqual(extra("HEEP2", "(0 044.0 020 044.0 046.0 054.0 0 058.4 060 120 030 0000 0000 10 0000 52.0 30000")
+                         ["second_output_discharge_time_min"], 0)
+        self.assertEqual(extra("HBAT", "(04 052.6 028 002 00000 388 101002010000 00000000")["charge_switches"],
+                         "Master on, solar off, AC on")
+
+    def test_pi30_settings_readback(self) -> None:
+        qpiri = (
+            "(230.0 26.9 230.0 50.0 26.9 6200 6200 48.0 46.0 44.8 56.4 56.4 4 30 060 0 1 2 9 01 0 0 54.0 1 1"
+        )
+        self.assertEqual(
+            self.module.decode_qpiri_settings(qpiri),
+            {"ac_input_voltage_range": "Appliance", "output_source_priority": "SBU priority", "charger_priority": "OSO",
+             # cross-check only (HEEP1 is primary)
+             "output_voltage": "230 V", "output_frequency": "50 Hz", "output_mode": "SIG"},
+        )
+        self.assertEqual(self.module.decode_qpiri_settings("(230.0 26.9"), {})
+        flags = self.module.decode_qflag_settings("(EakxyDbjuvz")
+        self.assertTrue(flags["buzzer"])
+        self.assertTrue(flags["display_return_homepage"])
+        self.assertTrue(flags["backlight"])
+        self.assertFalse(flags["overload_bypass"])
+        self.assertFalse(flags["power_saving"])
+        self.assertFalse(flags["fault_code_record"])
+        self.assertEqual(self.module.decode_qflag_settings("(NAK"), {})
+        self.assertEqual(
+            self.module.decode_qbeqi_settings("(0 060 030 060 030 58.40 000 120 0 0000"),
+            {"battery_equalization_mode_enable": False},
+        )
+        for command in ("QPIRI", "QFLAG", "QBEQI", "PEb", "PDb", "PEz", "PDz", "PGR00", "PGR01"):
+            with self.subTest(command=command):
+                self.assertEqual(self.module.build_crc_frame(command)[-1:], b"\r")
+
     def test_v1_entity_policy_keeps_risky_and_low_confidence_fields_out_of_production(self) -> None:
         component_schema = (ROOT / "components" / "solarplug" / "__init__.py").read_text(encoding="utf-8")
         component_header = (ROOT / "components" / "solarplug" / "solarplug.h").read_text(encoding="utf-8")
@@ -833,14 +976,12 @@ class DecodeHProtocolTest(unittest.TestCase):
         self.assertNotIn("PDSRS", component_schema)
         self.assertNotIn("PDDLYT", component_schema)
         self.assertIn('"charger_priority": ("CSO", "SNU", "OSO")', component_schema)
-        self.assertIn(
-            '"output_source_priority": ("SUB priority", "SBU priority", "Utility first (legacy)")',
-            component_schema,
-        )
+        self.assertIn('"output_source_priority": ("SUB priority", "SBU priority")', component_schema)
+        self.assertNotIn("Utility first", component_schema)  # POP02 is SUF (grid feed) on sibling firmwares
         self.assertIn('"pv_energy_feeding_priority": ("BLU", "LBU")', component_schema)
         self.assertIn('"battery_bulk_voltage": ("battery_bulk_voltage"', component_schema)
         self.assertIn('"battery_recharge_voltage": ("battery_recharge_voltage"', component_schema)
-        self.assertIn('"battery_redischarge_voltage": ("battery_redischarge_voltage"', component_schema)
+        self.assertIn('"battery_redischarge_voltage": ("Full",)', component_schema)
         self.assertIn('"battery_float_voltage": ("battery_float_voltage"', component_schema)
         self.assertIn('"battery_cut_off_voltage": ("battery_cut_off_voltage"', component_schema)
         self.assertIn('CONF_WRITE_PROFILE = "write_profile"', component_schema)
@@ -850,35 +991,21 @@ class DecodeHProtocolTest(unittest.TestCase):
         self.assertIn('"battery_equalization_timeout": ("battery_equalization_timeout"', component_schema)
         self.assertIn('"battery_equalization_mode_enable": "battery_equalization_mode_enable"', component_schema)
         self.assertIn(
-            '"daily_power_gen": ("HGEN", "daily_power_gen_kwh", UNIT_KILOWATT_HOURS, DEVICE_CLASS_ENERGY, STATE_CLASS_MEASUREMENT',
+            '"daily_power_gen": ("HGEN", "daily_power_gen_kwh", UNIT_KILOWATT_HOURS, DEVICE_CLASS_ENERGY, STATE_CLASS_TOTAL_INCREASING',
             component_schema,
         )
         self.assertIn(
-            '"monthly_electricity_generation": ("HGEN", "monthly_electricity_generation_kwh", UNIT_KILOWATT_HOURS, DEVICE_CLASS_ENERGY, STATE_CLASS_MEASUREMENT',
+            '"monthly_electricity_generation": ("HGEN", "monthly_electricity_generation_kwh", UNIT_KILOWATT_HOURS, DEVICE_CLASS_ENERGY, STATE_CLASS_TOTAL_INCREASING',
             component_schema,
         )
         self.assertIn(
-            '"yearly_electricity_generation": ("HGEN", "yearly_electricity_generation_kwh", UNIT_KILOWATT_HOURS, DEVICE_CLASS_ENERGY, STATE_CLASS_MEASUREMENT',
+            '"yearly_electricity_generation": ("HGEN", "yearly_electricity_generation_kwh", UNIT_KILOWATT_HOURS, DEVICE_CLASS_ENERGY, STATE_CLASS_TOTAL_INCREASING',
             component_schema,
         )
         self.assertIn(
             '"total_power_generation": ("HGEN", "total_power_generation_kwh", UNIT_KILOWATT_HOURS, DEVICE_CLASS_ENERGY, STATE_CLASS_TOTAL_INCREASING',
             component_schema,
         )
-
-        fields = (ROOT / "protocol" / "fields.yaml").read_text(encoding="utf-8")
-        self.assertIn("name: bms_soc_percent", fields)
-        self.assertIn("confidence: medium-high", fields)
-        self.assertIn("name: cell_voltage_list", fields)
-        self.assertIn("confidence: low", fields)
-        self.assertIn("HEEP1:\n    policy: diagnostic", fields)
-        self.assertIn("solar_of_things_match_and_monthly_reset", fields)
-
-        commands = (ROOT / "protocol" / "commands.yaml").read_text(encoding="utf-8")
-        self.assertIn("write_controls:", commands)
-        self.assertIn("key: battery_recharge_voltage", commands)
-        self.assertIn("policy: bus_observed_nak", commands)
-        self.assertIn("profile: unsafe", commands)
 
         decoder = (ROOT / "tools" / "decode_h_protocol.py").read_text(encoding="utf-8")
         self.assertNotIn("SolarOfThingsClient", decoder)
@@ -898,8 +1025,8 @@ class DecodeHProtocolTest(unittest.TestCase):
         beta_package = (ROOT / "packages" / "solarplug-write-beta.yaml").read_text(encoding="utf-8")
 
         self.assertIn("write_profile: beta", beta_package)
-        self.assertIn("raw_frame_logging: true", beta_package)
-        self.assertIn("decoded_field_logging: true", beta_package)
+        self.assertIn("raw_frame_logging: false", beta_package)
+        self.assertIn("decoded_field_logging: false", beta_package)
         self.assertIn("debug:\n  update_interval: 30s", beta_yaml)
         self.assertIn("platform: debug", beta_yaml)
         self.assertIn("name: Beta Heap Largest Block", beta_yaml)
@@ -919,8 +1046,219 @@ class DecodeHProtocolTest(unittest.TestCase):
             (selects_block, "pv_energy_feeding_priority"),
             (numbers_block, "bms_lock_machine_battery_capacity"),
             (switches_block, "bms_function_enable"),
+            (switches_block, "battery_equalization_mode_enable"),
+            (switches_block, "power_saving"),
+            (numbers_block, "battery_equalization_voltage"),
         ):
             self.assertRegex(block, rf"    {re.escape(key)}:\n(?:      .*\n)*      disabled_by_default: true")
+
+
+CODEC_SOURCES = [
+    ROOT / "components" / "solarplug" / "solarplug_codec.cpp",
+    ROOT / "components" / "solarplug" / "solarplug_writes.cpp",
+    ROOT / "tests" / "cpp" / "codec_harness.cpp",
+]
+CORPUS = ROOT / "tests" / "fixtures" / "payload_corpus.tsv"
+
+
+def build_codec_harness(tmpdir: str) -> Path | None:
+    compiler = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+    if compiler is None:
+        return None
+    exe = Path(tmpdir) / "codec_harness"
+    subprocess.run(
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "components" / "solarplug"),
+         *map(str, CODEC_SOURCES), "-o", str(exe)],
+        check=True,
+    )
+    return exe
+
+
+class FirmwareCodecTest(unittest.TestCase):
+    """Compiles the ESP's own decode/readback code on the host and checks it against the Python reference."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.exe = build_codec_harness(cls.tmp.name)
+        cls.module = load_module()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.tmp.cleanup()
+
+    def setUp(self) -> None:
+        if self.exe is None:
+            self.skipTest("no C++ compiler on this host")
+
+    def test_codec_selftest(self) -> None:
+        result = subprocess.run([str(self.exe)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.strip(), "OK")
+
+    def _dump(self) -> list[tuple[str, str, dict[str, str], dict[str, str]]]:
+        result = subprocess.run([str(self.exe), "dump"], input=CORPUS.read_text(encoding="utf-8"),
+                                capture_output=True, text=True, check=True)
+        frames, fields, readings = [], {}, {}
+        self.assertNotIn("SKIPPED", result.stdout, "corpus rows below the firmware's minimum token count")
+        for line in result.stdout.splitlines():
+            kind, command, *rest = line.split("\t")
+            if kind == "F":
+                fields[rest[0]] = rest[1] if len(rest) > 1 else ""
+            elif kind == "R":
+                readings[rest[0]] = rest[1]
+            elif kind == "E":
+                frames.append((command, rest[0], fields, readings))
+                fields, readings = {}, {}
+        return frames
+
+    def test_corpus_parity_with_python_reference(self) -> None:
+        frames = self._dump()
+        self.assertGreater(len(frames), 50)
+        m = self.module
+        checked = 0
+
+        def same(py: dict, cpp: dict, label: str) -> None:
+            nonlocal checked
+            for key, value in py.items():
+                expected = ("on" if value else "off") if isinstance(value, bool) else str(value)
+                with self.subTest(frame=label, key=key):
+                    self.assertIn(key, cpp)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        self.assertAlmostEqual(float(cpp[key]), float(value), places=3)
+                    else:
+                        self.assertEqual(cpp[key], expected)
+                    checked += 1
+
+        for command, payload, fields, readings in frames:
+            label = f"{command} {payload}"
+            if command == "HEEP1":
+                same(m.decode_heep1_settings(payload), readings, label)
+            elif command == "HEEP2":
+                same(m.decode_heep2_settings(payload), readings, label)
+                same(m.decode_extra_fields(command, payload), fields, label)
+            elif command == "QPIRI":
+                same(m.decode_qpiri_settings(payload), readings, label)
+            elif command == "QFLAG":
+                same(m.decode_qflag_settings(payload), readings, label)
+            elif command == "QBEQI":
+                same(m.decode_qbeqi_settings(payload), readings, label)
+            elif command == "HSTS":
+                same(m.decode_hsts_status(payload), fields, label)
+            elif command == "HBMS1":
+                same(m.decode_hbms1_status(payload), fields, label)
+            elif command in ("HOP", "HTEMP", "HIMSG1", "HIMSG2", "HBAT", "HEEP3"):
+                same(m.decode_extra_fields(command, payload), fields, label)
+            if command == "HTEMP":
+                py = m.decode_htemp(payload)
+                for key in ("pv_temperature_c", "inverter_temperature_c", "boost_temperature_c",
+                            "transformer_temperature_c", "max_temperature_c", "fan_1_speed_percent",
+                            "fan_2_speed_percent"):
+                    with self.subTest(frame=label, key=key):
+                        self.assertAlmostEqual(float(fields[key]), float(py[key]))
+                        checked += 1
+        self.assertGreater(checked, 200)
+
+
+def schema_tables() -> dict[str, dict]:
+    """The write-entity tables of components/solarplug/__init__.py, read without importing ESPHome."""
+    import ast
+
+    tree = ast.parse((ROOT / "components" / "solarplug" / "__init__.py").read_text(encoding="utf-8"))
+    tables: dict[str, dict] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            name = node.targets[0].id
+            if name in ("WRITE_SWITCHES", "WRITE_SELECTS", "EXTENDED_SELECT_OPTIONS"):
+                tables[name] = eval(compile(ast.Expression(node.value), name, "eval"),
+                                    {"__builtins__": {"tuple": tuple, "range": range}})
+            elif name == "WRITE_NUMBERS":  # (key, unit, device_class, min, max, step): constants only for 0, 3-5
+                tables[name] = {
+                    ast.literal_eval(k): tuple(ast.literal_eval(v.elts[i]) for i in (0, 3, 4, 5))
+                    for k, v in zip(node.value.keys, node.value.values)
+                }
+    return tables
+
+
+# Reported values that satisfy every ordering rule for the key under test (bounds set wide open).
+ORDERED_CONTEXT = {
+    "bms_lock_machine_battery_capacity": "soc_back_to_mains=1001",
+    "soc_back_to_mains": "bms_lock_machine_battery_capacity=-1;soc_back_to_battery=1001",
+    "soc_back_to_battery": "soc_back_to_mains=-1",
+    "second_output_cutoff_soc": "restore_second_output_battery_capacity=1001",
+    "restore_second_output_battery_capacity": "second_output_cutoff_soc=-1",
+    "ac_charge_start_hour": "ac_charge_stop_hour=0",
+    "ac_charge_stop_hour": "ac_charge_start_hour=0",
+    "ac_output_start_hour": "ac_output_stop_hour=0",
+    "ac_output_stop_hour": "ac_output_start_hour=0",
+}
+
+
+class SchemaEncoderParityTest(unittest.TestCase):
+    """Every value an HA entity offers must be accepted by the firmware's encoder (solarplug_writes.cpp)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.exe = build_codec_harness(cls.tmp.name)
+        cls.tables = schema_tables()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.tmp.cleanup()
+
+    def setUp(self) -> None:
+        if self.exe is None:
+            self.skipTest("no C++ compiler on this host")
+
+    def encode(self, requests: list[str]) -> list[str]:
+        result = subprocess.run([str(self.exe), "encode"], input="\n".join(requests) + "\n",
+                                capture_output=True, text=True, check=True)
+        lines = result.stdout.splitlines()
+        self.assertEqual(len(lines), len(requests))
+        return lines
+
+    def assert_all_accepted(self, requests: list[str]) -> int:
+        for request, answer in zip(requests, self.encode(requests)):
+            with self.subTest(request=request):
+                self.assertTrue(answer.startswith("OK\t"), f"{request!r} -> {answer!r}")
+        return len(requests)
+
+    def test_every_switch_state_encodes(self) -> None:
+        keys = self.tables["WRITE_SWITCHES"].values()
+        self.assertGreaterEqual(self.assert_all_accepted([f"S\t{k}\t{s}" for k in keys for s in (0, 1)]), 30)
+
+    def test_every_select_option_encodes(self) -> None:
+        requests = []
+        for key, options in self.tables["WRITE_SELECTS"].items():
+            requests += [f"L\t{key}\t{option}" for option in options]
+        for key, options in self.tables["EXTENDED_SELECT_OPTIONS"].items():
+            requests += [f"L\t{key}\t{option}" for option in options]
+        self.assertGreaterEqual(self.assert_all_accepted(requests), 40)
+
+    def test_every_number_grid_point_encodes(self) -> None:
+        requests = []
+        for key, (write_key, low, high, step) in self.tables["WRITE_NUMBERS"].items():
+            count = int(round((high - low) / step))
+            context = ORDERED_CONTEXT.get(write_key, "")
+            for i in range(count + 1):
+                value = round(low + i * step, 6)
+                requests.append(f"N\t{write_key}\t{value}" + (f"\t{context}" if context else ""))
+        self.assertGreater(self.assert_all_accepted(requests), 1000)
+
+    def test_off_grid_and_out_of_range_numbers_are_refused(self) -> None:
+        requests, keys = [], []
+        for key, (write_key, low, high, step) in self.tables["WRITE_NUMBERS"].items():
+            context = ORDERED_CONTEXT.get(write_key, "")
+            suffix = f"\t{context}" if context else ""
+            requests.append(f"N\t{write_key}\t{high + step}{suffix}")
+            keys.append(write_key)
+            if step >= 1:
+                requests.append(f"N\t{write_key}\t{low + step / 2}{suffix}")
+                keys.append(write_key)
+        for request, answer in zip(requests, self.encode(requests)):
+            with self.subTest(request=request):
+                self.assertTrue(answer.startswith("REFUSED\t"), f"{request!r} -> {answer!r}")
 
 
 if __name__ == "__main__":

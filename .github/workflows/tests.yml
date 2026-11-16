@@ -1,0 +1,32 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  decoder-and-codec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Builds components/solarplug/solarplug_codec.cpp and solarplug_writes.cpp with the host g++ (-Wall -Wextra -Werror),
+      # runs its self-test, and checks it against the Python reference over tests/fixtures/payload_corpus.tsv.
+      - name: Unit tests
+        run: python -m unittest tests.test_decode_h_protocol -v
+
+  esphome-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Same ESPHome as the production Device Builder. Validates every example (and the unsafe package) against
+      # this checkout's component and packages; nothing is compiled.
+      - name: Install ESPHome
+        run: pip install "esphome==2026.10.2"
+      - name: Validate example configs
+        run: python tools/validate_examples.py

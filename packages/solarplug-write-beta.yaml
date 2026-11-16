@@ -1,13 +1,35 @@
+# Diagnostics actions (Developer tools > Actions in HA): esphome.<node>_probe_read sends one allow-listed read
+# (a polled command, or HEEP3 / HCTMSG1 / HSTS2 / QPIGS ...) and shows the raw reply on Probe Result.
+# esphome.<node>_probe_write only accepts HOSTCRCEN / HOSTCRCDN (response-CRC mode, docs/protocol/H_COMMANDS.md).
+api:
+  actions:
+    - action: probe_read
+      variables:
+        command: string
+      then:
+        - lambda: 'id(solarplug_reader).probe_read(command);'
+    - action: probe_write
+      variables:
+        command: string
+      then:
+        - lambda: 'id(solarplug_reader).probe_write(command);'
+
 solarplug:
   id: solarplug_reader
   enable_writes: true
   write_profile: beta
-  raw_frame_logging: true
-  decoded_field_logging: true
+  # Lab logging forces every command to be polled and logs each frame at INFO; enable only for captures.
+  raw_frame_logging: false
+  decoded_field_logging: false
   text_sensors:
     last_write_status:
       name: Last Write Status
       icon: mdi:playlist-check
+    readback_cross_check: { name: Readback Cross-Check, icon: mdi:check-decagram-outline }
+    probe_result: { name: Probe Result, icon: mdi:console-line, disabled_by_default: true }
+    qpiri_raw_payload: { name: QPIRI Raw Payload, icon: mdi:file-document-outline, disabled_by_default: true }
+    qflag_raw_payload: { name: QFLAG Raw Payload, icon: mdi:file-document-outline, disabled_by_default: true }
+    qbeqi_raw_payload: { name: QBEQI Raw Payload, icon: mdi:file-document-outline, disabled_by_default: true }
   switches:
     buzzer: { name: Buzzer On, icon: mdi:bell-outline }
     backlight: { name: Backlight On, icon: mdi:monitor-small }
@@ -15,30 +37,42 @@ solarplug:
     over_temperature_restart: { name: Over Temperature Restart, icon: mdi:thermometer-alert }
     overload_restart: { name: Overload Restart, icon: mdi:alert-outline }
     input_source_detection_prompt_sound: { name: Input Source Prompt Sound, icon: mdi:volume-high }
-    battery_equalization_mode_enable: { name: Battery Equalization Mode Enable, icon: mdi:toggle-switch-outline }
+    battery_equalization_mode_enable:
+      name: Battery Equalization Mode Enable
+      icon: mdi:toggle-switch-outline
+      # ACK-only (not toggle-tested); the inverter accepts PBEQE1 even with a lithium battery type.
+      disabled_by_default: true
     bms_function_enable:
       name: BMS Function Enable
       icon: mdi:battery-sync
+      disabled_by_default: true
+    overload_bypass: { name: Overload Bypass, icon: mdi:transit-detour }
+    fault_code_record: { name: Record Fault Codes, icon: mdi:clipboard-alert-outline }
+    power_saving:
+      name: ECO Power Saving
+      icon: mdi:leaf
+      # Program 08: in battery mode the output switches off at low load. Enable only on purpose.
       disabled_by_default: true
   numbers:
     battery_equalization_interval:
       name: Battery Equalization Interval
       icon: mdi:calendar-range
+      disabled_by_default: true  # equalization is for lead-acid; keep off on lithium
     battery_equalization_timeout:
       name: Battery Equalization Timeout
       icon: mdi:timer-cog-outline
+      disabled_by_default: true  # equalization is for lead-acid; keep off on lithium
     battery_equalization_time:
       name: Battery Equalization Time
       icon: mdi:timer-outline
+      disabled_by_default: true  # equalization is for lead-acid; keep off on lithium
     battery_equalization_voltage:
       name: Battery Equalization Voltage
       icon: mdi:battery-sync
+      disabled_by_default: true  # equalization is for lead-acid; keep off on lithium
     battery_recharge_voltage:
       name: Battery Recharge Voltage
       icon: mdi:battery-plus
-    battery_redischarge_voltage:
-      name: Battery Redischarge Voltage
-      icon: mdi:battery-minus
     restore_second_output_battery_capacity:
       name: Restore Second Output Battery Capacity
       icon: mdi:battery-clock
@@ -49,16 +83,32 @@ solarplug:
       name: BMS Lock Machine Battery Capacity
       icon: mdi:battery-lock
       disabled_by_default: true
+    # Round-trip verified 2026-11-16 (runs/20261116-vendor-setter-roundtrips). The voltage twins PSLV / PDSDV /
+    # PDSRV NAK on this firmware with a lithium battery type and need write_profile: unsafe.
+    soc_back_to_mains: { name: SOC Back To Mains, icon: mdi:transmission-tower-import }
+    soc_back_to_battery: { name: SOC Back To Battery, icon: mdi:battery-arrow-up }
+    inverter_restart_soc: { name: Inverter Restart SOC, icon: mdi:restart }
+    second_output_cutoff_soc: { name: Second Output Cut-off SOC, icon: mdi:power-plug-off }
+    second_output_discharge_time:
+      name: Second Output Discharge Time
+      icon: mdi:timer-sand
+      # Program 65. Per the manual the second output is cut only when this time is reached AND program 60
+      # dual output is disabled AND the battery is below the program 61 voltage. 0 vs "Disable": unconfirmed.
+      disabled_by_default: true
     grid_connected_current:
       name: Grid Connected Current
       icon: mdi:current-ac
-    maximum_mains_charging_current:
-      name: Maximum Mains Charging Current
-      icon: mdi:current-ac
+  selects:
+    # Options follow the inverter's announced lists (QMCHGCR / QMUCHGCR), so every choice is accepted.
     maximum_charging_current:
       name: Maximum Charging Current
       icon: mdi:battery-charging
-  selects:
+    maximum_mains_charging_current:
+      name: Maximum Mains Charging Current
+      icon: mdi:current-ac
+    battery_redischarge_voltage:  # program 13: Full or 48-58 V
+      name: Battery Redischarge Voltage
+      icon: mdi:battery-minus
     battery_type:
       name: Battery Type
       disabled_by_default: true
@@ -71,3 +121,6 @@ solarplug:
     pv_energy_feeding_priority:
       name: PV Energy Feeding Priority
       disabled_by_default: true
+    ac_input_voltage_range:
+      name: AC Input Voltage Range
+      icon: mdi:sine-wave

@@ -6,7 +6,11 @@ solarplug:
   boot_poll_delay: 10s
   fast_poll_interval: 20s
   energy_poll_interval: 60s
+  settings_poll_interval: 5min
   identity_poll_interval: 30min
+  # Every H reply carries a CRC16 while the inverter is in response-CRC mode. HOSTCRCEN is re-sent every
+  # 30 s because the mode lapses about 64 s after each one (tested on HPVINV02 fw 40.05, 2026-11-16).
+  response_crc: true
   sensors:
     ac_input_voltage: { name: AC Input Voltage, icon: mdi:transmission-tower-import }
     mains_frequency: { name: Mains Frequency, icon: mdi:sine-wave }
@@ -46,8 +50,42 @@ solarplug:
       name: HPVB PV Power
       icon: mdi:solar-power-variant
       disabled_by_default: true
+    heep_second_output_recovery_voltage: { name: Setting Second Output Recovery Voltage, icon: mdi:power-plug }
+    heep_second_output_cutoff_voltage: { name: Setting Second Output Cut-off Voltage, icon: mdi:power-plug-off }
+    heep_low_battery_alarm_voltage: { name: Setting Low Battery Alarm Voltage, icon: mdi:battery-alert }
+    setting_output_voltage: { name: Setting Output Voltage, icon: mdi:sine-wave }
+    setting_output_frequency: { name: Setting Output Frequency, icon: mdi:sine-wave }
+    setting_battery_under_voltage: { name: Setting Battery Under Voltage, icon: mdi:battery-alert-variant-outline }
+    bms_temperature: { name: BMS Temperature, icon: mdi:thermometer }
+    inductor_power: { name: Inductor Power, icon: mdi:sine-wave }
+    rated_inverter_power: { name: Rated Inverter Power, icon: mdi:flash }
+    rated_mppt_power: { name: Rated MPPT Power, icon: mdi:solar-power }
+    rated_ac_power: { name: Rated AC Power, icon: mdi:transmission-tower }
+    ct_zero_adjust_power: { name: CT Zero Adjust Power, icon: mdi:current-ac, disabled_by_default: true }  # HEEP3[3], unconfirmed
+    second_output_discharge_time: { name: Setting Second Output Discharge Time, icon: mdi:timer-sand }
+    bus_utilization: { name: Inverter Bus Utilization, icon: mdi:chart-donut }
+    bus_response_time: { name: Inverter Bus Response Time, icon: mdi:timer-outline }
+    bus_timeouts: { name: Inverter Bus Timeouts, icon: mdi:timer-alert-outline }
+    bus_frame_errors: { name: Inverter Bus Frame Errors, icon: mdi:alert-circle-outline }
+    bus_naks: { name: Inverter Bus NAKs, icon: mdi:close-octagon-outline }
   text_sensors:
     operating_mode: { name: Operating Mode, icon: mdi:power-plug }
+    response_crc: { name: Response CRC, icon: mdi:shield-check-outline }
+    inverter_alarms: { name: Inverter Alarms, icon: mdi:alert-outline }
+    fault_code: { name: Fault Code, icon: mdi:alert-octagon-outline }
+    fault_description: { name: Fault Description, icon: mdi:alert-octagon-outline }
+    front_panel_leds: { name: Front Panel LEDs, icon: mdi:led-on }
+    fan_enable: { name: Fan Enable, icon: mdi:fan-auto }
+    software_integrity: { name: Software Integrity, icon: mdi:shield-check-outline }
+    himsg2_raw_payload: { name: HIMSG2 Raw Payload, icon: mdi:file-document-outline, disabled_by_default: true }
+    heep3_raw_payload: { name: HEEP3 Raw Payload, icon: mdi:file-document-outline, disabled_by_default: true }
+    allowed_charge_currents: { name: Allowed Charge Currents, icon: mdi:format-list-numbered }
+    allowed_mains_charge_currents: { name: Allowed Mains Charge Currents, icon: mdi:format-list-numbered }
+    second_output: { name: Second Output, icon: mdi:power-socket-eu }
+    grid_tie_state: { name: Grid Tie State, icon: mdi:transmission-tower }
+    main_output_relay: { name: Main Output Relay, icon: mdi:electric-switch }
+    charge_switches: { name: Charge Switches, icon: mdi:battery-charging-outline }
+    bms_status: { name: BMS Status, icon: mdi:battery-check-outline }
     battery_type: { name: Battery Type, icon: mdi:battery-sync }
     device_type: { name: Device Type, icon: mdi:identifier }
     software_version: { name: Software Version, icon: mdi:tag-text }
@@ -70,8 +108,20 @@ solarplug:
       name: HPVB Raw Payload
       icon: mdi:file-document-outline
       disabled_by_default: true
+    ac_output_mode: { name: AC Output Mode, icon: mdi:sitemap-outline }
+    grid_protocol_mode: { name: Grid Protocol Mode, icon: mdi:transmission-tower }
+    ct_function: { name: CT Function, icon: mdi:current-ac }
+    bms_communication: { name: BMS Communication, icon: mdi:battery-sync-outline }
+    grid_feed: { name: Grid Feed, icon: mdi:transmission-tower-export }
+    dual_output_mode: { name: Dual Output Mode, icon: mdi:power-socket-eu }  # HEEP2[0]; LCD program 60 unconfirmed
+    ac_charge_window_raw: { name: AC Charge Window Raw, icon: mdi:clock-time-four-outline, disabled_by_default: true }
+    ac_output_window_raw: { name: AC Output Window Raw, icon: mdi:clock-time-four-outline, disabled_by_default: true }
+    output_timer_raw: { name: Output Timer Raw, icon: mdi:clock-time-four-outline, disabled_by_default: true }
+    parallel_units: { name: Parallel Units, icon: mdi:server-network, disabled_by_default: true }
+    parallel_role: { name: Parallel Role, icon: mdi:server-network, disabled_by_default: true }
   buttons:
     refresh_fast: { name: Refresh Fast Poll, icon: mdi:refresh }
     refresh_energy: { name: Refresh Energy Poll, icon: mdi:solar-power-variant }
     refresh_identity: { name: Refresh Identity Poll, icon: mdi:identifier }
+    refresh_settings: { name: Refresh Settings Poll, icon: mdi:cog-refresh-outline }
     refresh_all: { name: Refresh All Poll, icon: mdi:refresh-circle }

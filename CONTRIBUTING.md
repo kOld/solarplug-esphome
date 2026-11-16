@@ -20,10 +20,9 @@ Redact credentials, tokens, Wi-Fi passwords, public IPs, exact home addresses, a
 
 Every decoder change should include:
 
-- replay fixture or small sample frame
-- unit test coverage
-- confidence level update in `protocol/fields.yaml`
-- docs update when field meaning changes
+- a real reply added to `tests/fixtures/payload_corpus.tsv` (mark synthetic rows as such);
+- the same decode in `components/solarplug/solarplug_codec.cpp` and the Python reference in `tools/decode_h_protocol.py`; the parity test compares them on every corpus row;
+- the slot and its evidence class in `docs/protocol/HEEP_SETTINGS_MAP.md`.
 
 Do not promote diagnostic fields to production entities without capture evidence and a matching trusted source.
 
@@ -31,7 +30,7 @@ Do not promote diagnostic fields to production entities without capture evidence
 
 Add new models to `docs/protocol/COMPATIBILITY.md` using one of these statuses:
 
-- `confirmed`: active read-only replacement or passive sniffer capture proves the command set.
+- `confirmed`: an active replacement or a passive sniffer capture proves the command set.
 - `likely compatible, unverified`: the model is listed for the same dongle family, but no capture has been submitted.
 - `research lead`: public evidence suggests a relation, but dongle/model/protocol identity is not proven.
 
@@ -39,4 +38,11 @@ Do not mark a model confirmed from a sales listing alone.
 
 ## Write Commands
 
-Write/control commands are research-only for v1. Do not add write controls to the ESPHome component without a separate safety design and explicit opt-in lab mode.
+To add a write control:
+1. Add its encoder to `components/solarplug/solarplug_writes.cpp`, with range, step and any ordering rule.
+2. Add golden frames and refusals to `tests/cpp/codec_harness.cpp`.
+3. Add the entity to `__init__.py`. If the frame is NAK-only, never sent or able to cut the output, add the key to the unsafe set.
+4. Add a readback slot in the codec, so the entity is seeded from the inverter and not published optimistically.
+5. Run `python3 -m unittest tests.test_decode_h_protocol`. `SchemaEncoderParityTest` fails if the entity offers a value its encoder refuses.
+6. Run `python3 tools/validate_examples.py`.
+7. Record a round-trip in `docs/protocol/WRITE_TEST_LEDGER.md` before the control leaves the unsafe profile.

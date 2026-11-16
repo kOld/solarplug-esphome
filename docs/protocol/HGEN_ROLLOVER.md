@@ -12,7 +12,7 @@ The field meanings are already high confidence. This page tracks reset behavior 
 
 ### Daily Reset
 
-Historical local H-protocol captures around the April 29 to April 30 boundary show the daily field resetting while month/year/total stay unchanged.
+Both captures around the April 29 to 30 boundary read 0.000 kWh daily (after sunset and before sunrise), so they show month, year and total unchanged across midnight but not the reset itself. The daily reset is shown in the monthly table below: daily goes from `2.600 kWh` to `0.000 kWh` across the boundary.
 
 Observed examples:
 
@@ -49,7 +49,7 @@ Yearly reset behavior has not been observed. Expected behavior is that `yearly_e
 - a January 1 rollover is captured naturally; or
 - a controlled lab clock-shift test is designed and reviewed.
 
-No controlled clock-shift test should be part of the public read-only v1 release.
+Do not run a controlled clock-shift test on a production unit: moving the inverter's clock across a day, month or year boundary could reset or corrupt its own energy counters.
 
 ## Home Assistant Entity Policy
 
@@ -57,9 +57,9 @@ The ESPHome component intentionally uses:
 
 | Field | Device class | State class | Reason |
 |---|---|---|---|
-| `daily_power_gen_kwh` | `energy` | `measurement` | resets every day |
-| `monthly_electricity_generation_kwh` | `energy` | `measurement` | resets every month |
-| `yearly_electricity_generation_kwh` | `energy` | `measurement` | likely resets every year; yearly reset not yet captured |
+| `daily_power_gen_kwh` | `energy` | `total_increasing` | resets every day; decoder only lets it drop on a rollover to ~0 |
+| `monthly_electricity_generation_kwh` | `energy` | `total_increasing` | resets every month; same rollover guard |
+| `yearly_electricity_generation_kwh` | `energy` | `total_increasing` | likely resets every year; same rollover guard |
 | `total_power_generation_kwh` | `energy` | `total_increasing` | lifetime-style counter |
 
-Do not promote daily/monthly/yearly to `total_increasing` unless reset-aware handling is added.
+Daily/monthly/yearly were promoted to `total_increasing` (Home Assistant rejects `energy` + `measurement`). The decoder is reset-aware: a period counter may only decrease when it rolls over to <= 0.5 kWh; any other dip is held back unless it repeats on 3 consecutive polls, so a glitch cannot be counted as a reset.
