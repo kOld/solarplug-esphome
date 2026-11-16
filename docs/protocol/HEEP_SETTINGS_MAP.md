@@ -2,7 +2,7 @@
 
 This is the canonical reference for every inverter setting the component reads or writes. It covers the PowMr POW-HVM6.2KP (`HPVINV02`, `VMII-6200`, firmware `40.05`). Each row gives the frame, the value range, the readback slot, the strength of the evidence, and the default state in `packages/solarplug-write-beta.yaml`. The "unsafe" rows live in `packages/solarplug-write-unsafe.yaml`, which needs `write_profile: unsafe`; every entity there is disabled by default.
 
-Token indexes are zero-based after stripping `(`. "dN" means character N of a packed token.
+Token indexes are zero-based after stripping `(`. "dN" means character N of a packed token. Slots are given for the HPVINV02 layout; the GB3024 and LPVINV02 layouts are normalized onto it, and the priority codes depend on the machine type (see [COMPATIBILITY.md](COMPATIBILITY.md#model-profile)).
 
 ## Evidence classes
 

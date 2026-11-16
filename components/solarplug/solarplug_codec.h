@@ -71,8 +71,37 @@ std::pair<uint8_t, uint8_t> adjust_crc_bytes(uint16_t crc);
 // QMUCHGCR) inside a static envelope for this model, so a reply can only ever narrow what is offered:
 // maximum 10-80 A in 10 A steps; mains 2 A or 10-60 A in 10 A steps (HPVINV02 fw 40.05).
 bool charge_current_in_envelope(bool mains, int amps);
+// Envelope check with a configured option list (empty or null: the HPVINV02 defaults above).
+bool charge_current_allowed(const std::vector<int> *envelope, bool mains, int amps);
+// "54 V" / "24.5 V": the text of a voltage option, shared by the select options and the readback.
+std::string volts_option(float volts);
 std::string amps_option(int amps);                            // 80 -> "80 A"
 std::optional<int> parse_amps_option(const std::string &option);  // "80 A" -> 80
+
+// Machine type, as the vendor tool (TQF-AllInOne, SerialCommunicationService.MachineType) derives it from
+// QPRTL. It decides the output- and charger-priority codes; everything else is shared:
+//   A: HPVINV01   B: HPVINV02, HPVINV05   C: HPVINV03   D: HPVINV04   F: HPVINV08
+// Any other reply (sibling brands, HPVINV06/07) is UNKNOWN and uses the type B codes, which is what every
+// earlier release did. Only type B is verified on hardware (PowMr POW-HVM6.2KP, fw 40.05).
+enum class MachineType : uint8_t { UNKNOWN, A, B, C, D, F };
+MachineType machine_type_from_qprtl(const std::string &device_type);
+const char *machine_type_name(MachineType type);
+// Priority option <-> code for a machine type; nullptr / nullopt where the type has no such option.
+//   output:  B/D/UNKNOWN 0 SUB, 1 SBU, 3 PEC    A/C 0 UTI, 1 SUB, 2 SBU    F 0 SUB, 1 SBU, 3 PEC
+//   charger: B/D/UNKNOWN/F 0 CSO, 1 SNU, 2 OSO, 3 SOR    A/C 1 CSO, 2 SNU, 3 OSO
+// Never offered: POP02 on B/D/F (SUF, feeds the grid) and charger code 0 on A/C (CUT).
+// true when two types share the priority code tables (an override must not contradict QPRTL).
+bool same_priority_codes(MachineType a, MachineType b);
+std::optional<int> output_priority_code(MachineType type, const std::string &option);
+const char *output_priority_option(MachineType type, int code);
+std::optional<int> charger_priority_code(MachineType type, const std::string &option);
+const char *charger_priority_option(MachineType type, int code);
+
+// HEEP1 in the HPVINV02 layout (20 tokens). Two sibling layouts from the vendor tool are mapped onto it:
+//   21 tokens: the generic GB3024 layout (HPVINV06; HPVINV02 before 2025-09) has an extra token at [4];
+//   19 tokens with a 5-digit [4]: LPVINV02 (VQ3024) packs [4] d0-2 plus the buzzer in d4.
+// Anything else returns nullopt, so readback is skipped rather than read from the wrong slots.
+std::optional<std::vector<std::string>> normalize_heep1(const std::vector<std::string> &tokens);
 
 // Settings readback: what a snapshot reply says about each write control.
 enum class ReadingKind { SWITCH, SELECT, NUMBER };
@@ -83,12 +112,17 @@ struct Reading {
   float number;      // numbers
   bool flag;         // switches
 };
-std::vector<Reading> heep1_readback(const std::vector<std::string> &tokens);
+// machine: the priority code table to use; nullopt (type not known yet) skips the priority readings.
+std::vector<Reading> heep1_readback(const std::vector<std::string> &tokens,
+                                    std::optional<MachineType> machine = MachineType::B);
 std::vector<Reading> heep2_readback(const std::vector<std::string> &tokens);
-std::vector<Reading> qpiri_readback(const std::vector<std::string> &tokens);
+// QPIRI's priority fields are mapped only for the verified type B codes (and UNKNOWN, which uses them).
+std::vector<Reading> qpiri_readback(const std::vector<std::string> &tokens,
+                                    std::optional<MachineType> machine = MachineType::B);
 std::vector<Reading> qflag_readback(const std::vector<std::string> &tokens);
 std::vector<Reading> qbeqi_readback(const std::vector<std::string> &tokens);
-std::vector<Reading> settings_readback(const std::string &command, const std::string &payload);
+std::vector<Reading> settings_readback(const std::string &command, const std::string &payload,
+                                       std::optional<MachineType> machine = MachineType::B);
 
 // Response-CRC mode (HOSTCRCEN). The inverter answers "(CRC16EN" and then appends a CRC to every H reply
 // for about 64 s. The tracker follows the mode from the replies themselves, so an ESP reboot or a lapsed

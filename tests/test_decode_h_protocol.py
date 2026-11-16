@@ -977,7 +977,6 @@ class DecodeHProtocolTest(unittest.TestCase):
         self.assertNotIn("PDDLYT", component_schema)
         self.assertIn('"charger_priority": ("CSO", "SNU", "OSO")', component_schema)
         self.assertIn('"output_source_priority": ("SUB priority", "SBU priority")', component_schema)
-        self.assertNotIn("Utility first", component_schema)  # POP02 is SUF (grid feed) on sibling firmwares
         self.assertIn('"pv_energy_feeding_priority": ("BLU", "LBU")', component_schema)
         self.assertIn('"battery_bulk_voltage": ("battery_bulk_voltage"', component_schema)
         self.assertIn('"battery_recharge_voltage": ("battery_recharge_voltage"', component_schema)
@@ -1160,6 +1159,17 @@ class FirmwareCodecTest(unittest.TestCase):
         self.assertGreater(checked, 200)
 
 
+def codegen_helpers() -> dict:
+    """The pure codegen helpers of __init__.py (redischarge_options, scale_voltage_traits), run without ESPHome."""
+    import ast
+
+    tree = ast.parse((ROOT / "components" / "solarplug" / "__init__.py").read_text(encoding="utf-8"))
+    wanted = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in ("redischarge_options", "scale_voltage_traits")]
+    namespace: dict = {}
+    exec(compile(ast.Module(body=wanted, type_ignores=[]), "__init__.py", "exec"), {"abs": abs, "round": round, "max": max, "range": range}, namespace)
+    return namespace
+
+
 def schema_tables() -> dict[str, dict]:
     """The write-entity tables of components/solarplug/__init__.py, read without importing ESPHome."""
     import ast
@@ -1169,12 +1179,17 @@ def schema_tables() -> dict[str, dict]:
     for node in tree.body:
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             name = node.targets[0].id
-            if name in ("WRITE_SWITCHES", "WRITE_SELECTS", "EXTENDED_SELECT_OPTIONS"):
+            if name in ("WRITE_SWITCHES", "WRITE_SELECTS", "EXTENDED_SELECT_OPTIONS", "PRIORITY_OPTIONS_AC"):
                 tables[name] = eval(compile(ast.Expression(node.value), name, "eval"),
                                     {"__builtins__": {"tuple": tuple, "range": range}})
             elif name == "WRITE_NUMBERS":  # (key, unit, device_class, min, max, step): constants only for 0, 3-5
                 tables[name] = {
                     ast.literal_eval(k): tuple(ast.literal_eval(v.elts[i]) for i in (0, 3, 4, 5))
+                    for k, v in zip(node.value.keys, node.value.values)
+                }
+                tables["WRITE_NUMBERS_UNITS"] = {
+                    ast.literal_eval(k): tuple(ast.literal_eval(v.elts[i]) for i in (0, 3, 4, 5))
+                    + (v.elts[1].id if isinstance(v.elts[1], ast.Name) else ast.literal_eval(v.elts[1]),)
                     for k, v in zip(node.value.keys, node.value.values)
                 }
     return tables
@@ -1211,8 +1226,8 @@ class SchemaEncoderParityTest(unittest.TestCase):
         if self.exe is None:
             self.skipTest("no C++ compiler on this host")
 
-    def encode(self, requests: list[str]) -> list[str]:
-        result = subprocess.run([str(self.exe), "encode"], input="\n".join(requests) + "\n",
+    def encode(self, requests: list[str], machine: str = "B", volts: int = 48) -> list[str]:
+        result = subprocess.run([str(self.exe), "encode", machine, str(volts)], input="\n".join(requests) + "\n",
                                 capture_output=True, text=True, check=True)
         lines = result.stdout.splitlines()
         self.assertEqual(len(lines), len(requests))
@@ -1232,9 +1247,55 @@ class SchemaEncoderParityTest(unittest.TestCase):
         requests = []
         for key, options in self.tables["WRITE_SELECTS"].items():
             requests += [f"L\t{key}\t{option}" for option in options]
-        for key, options in self.tables["EXTENDED_SELECT_OPTIONS"].items():
-            requests += [f"L\t{key}\t{option}" for option in options]
         self.assertGreaterEqual(self.assert_all_accepted(requests), 40)
+
+    def test_base_priority_options_encode_on_every_machine_type(self) -> None:
+        requests = [f"L\t{key}\t{option}" for key in ("output_source_priority", "charger_priority")
+                    for option in self.tables["WRITE_SELECTS"][key]]
+        for machine in ("A", "B", "C", "D", "F", "UNKNOWN"):
+            for request, answer in zip(requests, self.encode(requests, machine)):
+                with self.subTest(machine=machine, request=request):
+                    self.assertTrue(answer.startswith("OK\t"), f"{machine} {request!r} -> {answer!r}")
+
+    def test_every_extended_option_encodes_on_some_machine_type(self) -> None:
+        for key, options in self.tables["EXTENDED_SELECT_OPTIONS"].items():
+            for option in options:
+                request = f"L\t{key}\t{option}"
+                answers = [self.encode([request], machine)[0] for machine in ("A", "B", "C", "D", "F")]
+                with self.subTest(request=request):
+                    self.assertTrue(any(a.startswith("OK\t") for a in answers), f"{request!r} -> {answers}")
+
+    def test_type_ac_priority_options_encode(self) -> None:
+        requests = [f"L\t{key}\t{option}" for key, options in self.tables["PRIORITY_OPTIONS_AC"].items() for option in options]
+        for machine in ("A", "C"):
+            for request, answer in zip(requests, self.encode(requests, machine)):
+                with self.subTest(machine=machine, request=request):
+                    self.assertTrue(answer.startswith("OK\t"), f"{machine} {request!r} -> {answer!r}")
+
+    def test_codegen_redischarge_options_match_firmware(self) -> None:
+        helpers = codegen_helpers()
+        for volts in (24, 48):
+            firmware = self.encode([f"O\tredischarge\t{volts}"])[0].split("\t", 1)[1].split("|")
+            with self.subTest(volts=volts):
+                self.assertEqual(helpers["redischarge_options"](volts), firmware)
+
+    def test_24v_bank_grid_points_encode(self) -> None:
+        """Voltage entities are scaled to the bank at codegen (scale_voltage_traits); the encoder must agree."""
+        helpers = codegen_helpers()
+        requests = []
+        for key, (write_key, low, high, step, unit) in self.tables["WRITE_NUMBERS_UNITS"].items():
+            if unit != "UNIT_VOLT":
+                continue
+            low, high, step = helpers["scale_voltage_traits"](low, high, step, 24)
+            for i in range(int(round((high - low) / step)) + 1):
+                requests.append(f"N\t{write_key}\t{round(low + i * step, 6)}")
+        options = helpers["redischarge_options"](24)
+        self.assertEqual(options[:3], ["Full", "24 V", "24.5 V"])
+        requests += [f"L\tbattery_redischarge_voltage\t{option}" for option in options]
+        for request, answer in zip(requests, self.encode(requests, "B", 24)):
+            with self.subTest(request=request):
+                self.assertTrue(answer.startswith("OK\t"), f"{request!r} -> {answer!r}")
+        self.assertGreater(len(requests), 300)
 
     def test_every_number_grid_point_encodes(self) -> None:
         requests = []

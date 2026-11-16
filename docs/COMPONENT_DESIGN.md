@@ -67,7 +67,8 @@ The component does not inherit `PollingComponent`. It has poll tiers, manual ref
   - The rules are: BMS lock SOC < SOC back to mains < SOC back to battery, and cut-off SOC < restore SOC.
   - They are checked against the values the inverter last reported or acknowledged, and fail closed while a bound is unread.
   - Ordered settings and the paired hour windows are refused while another write is in flight.
-- **Charge currents:** the options are the inverter's announced `QMCHGCR` / `QMUCHGCR` lists inside the model envelope.
+- **Model profile:** priority codes follow the machine type (QPRTL or `machine_type`); voltage ranges scale with `battery_voltage` and are refused on a bank mismatch with `HBAT[0]`. HEEP1 is normalized from the GB3024 / LPVINV02 layouts first (`codec::normalize_heep1`); an unknown layout gives no readback. See [protocol/COMPATIBILITY.md](protocol/COMPATIBILITY.md#model-profile).
+- **Charge currents:** the options are the inverter's announced `QMCHGCR` / `QMUCHGCR` lists inside the configured envelope (`charging_current_options` / `mains_charging_current_options`).
   - The lists are adopted after two identical replies and persisted in flash, so the options are right from boot.
   - HA reads select options when it connects.
 

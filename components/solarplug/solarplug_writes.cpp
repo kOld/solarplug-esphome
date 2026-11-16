@@ -47,6 +47,14 @@ std::string range_reason(float min_value, float max_value, float step) {
 
 unsigned whole(float value) { return static_cast<unsigned>(std::lround(value)); }  // callers range-check first
 
+// A voltage setting is refused when the configured bank differs from the one the inverter reports.
+std::optional<std::string> bank_mismatch(const Context &context) {
+  if (context.detected_battery_voltage == 0) return std::string("battery bank size (HBAT) not read from the inverter yet");
+  if (context.detected_battery_voltage == context.battery_voltage) return std::nullopt;
+  return "battery_voltage is " + std::to_string(context.battery_voltage) + " V but the inverter reports a " +
+         std::to_string(context.detected_battery_voltage) + " V bank";
+}
+
 std::optional<float> reported(const Context &context, const char *key) {
   if (context.reported == nullptr) return std::nullopt;
   auto it = context.reported->find(key);
@@ -55,6 +63,13 @@ std::optional<float> reported(const Context &context, const char *key) {
 }
 
 }  // namespace
+
+std::vector<std::string> redischarge_options(int battery_voltage) {
+  std::vector<std::string> options = {"Full"};
+  const float scale = static_cast<float>(battery_voltage) / 48.0f;
+  for (int volts = 48; volts <= 58; volts++) options.push_back(codec::volts_option(static_cast<float>(volts) * scale));
+  return options;
+}
 
 Result encode_switch(const std::string &key, bool on) {
   struct Entry {
@@ -96,15 +111,6 @@ Result encode_select(const std::string &key, const std::string &option, const Co
     const char *label;
   };
   static const Entry entries[] = {
-      {"charger_priority", "CSO", "PCP00", "Charger priority (program 16)"},
-      {"charger_priority", "SNU", "PCP01", "Charger priority (program 16)"},
-      {"charger_priority", "OSO", "PCP02", "Charger priority (program 16)"},
-      {"charger_priority", "SOR", "PCP03", "Charger priority (program 16)"},  // extended options only
-      // POP02 is never offered: program 01 has only SUB / SBU, and on sibling firmwares POP02 is SUF
-      // (feed to grid).
-      {"output_source_priority", "SUB priority", "POP00", "Output source priority (program 01)"},
-      {"output_source_priority", "SBU priority", "POP01", "Output source priority (program 01)"},
-      {"output_source_priority", "PEC Mode (CT)", "POP03", "Output source priority (program 01)"},  // extended
       {"pv_energy_feeding_priority", "BLU", "PVENGUSE00", "Solar supply priority (program 43)"},
       {"pv_energy_feeding_priority", "LBU", "PVENGUSE01", "Solar supply priority (program 43)"},
       {"ac_input_voltage_range", "Appliance", "PGR00", "AC input voltage range (program 03)"},
@@ -130,6 +136,19 @@ Result encode_select(const std::string &key, const std::string &option, const Co
   for (const auto &entry : entries) {
     if (key == entry.key && option == entry.option) return Result::ok(entry.command, entry.label);
   }
+  if (key == "output_source_priority" || key == "charger_priority") {
+    // Codes depend on the machine type (codec::MachineType). POP02 (SUF, feeds the grid) is never encodable.
+    if (context.machine_type_conflict) return Result::refuse("machine_type in YAML contradicts the QPRTL reply");
+    if (!context.machine_type.has_value()) return Result::refuse("machine type not known yet (QPRTL not read)");
+    const bool output = key == "output_source_priority";
+    const auto code = output ? codec::output_priority_code(*context.machine_type, option)
+                             : codec::charger_priority_code(*context.machine_type, option);
+    if (!code.has_value()) {
+      return Result::refuse(option + " is not available on machine type " + codec::machine_type_name(*context.machine_type));
+    }
+    return Result::ok(format_int(output ? "POP%02u" : "PCP%02u", static_cast<unsigned>(*code)),
+                      output ? "Output source priority (program 01)" : "Charger priority (program 16)");
+  }
   if (key == "battery_type") {
     // PBT<NN> shares the readback enum (PBT03 = LIA and PBT04 = PYL are bus-confirmed).
     for (int code = 0; code < 10; code++) {
@@ -141,22 +160,24 @@ Result encode_select(const std::string &key, const std::string &option, const Co
     return Result::refuse("unknown battery type");
   }
   if (key == "battery_redischarge_voltage") {
-    // Program 13: "Full" (battery fully charged, sent as 00.0) or 48-58 V in 1 V steps.
+    // Program 13: "Full" (battery fully charged, sent as 00.0) or 48-58 V in 1 V steps, scaled to the bank.
+    if (const auto why = bank_mismatch(context)) return Result::refuse(*why);
     if (option == "Full") return Result::ok("PBDV00.0", "Back to battery voltage (program 13)");
-    const size_t space = option.find(" V");
-    if (option.size() == 4 && space == 2 && codec::is_digits(option.substr(0, 2))) {
-      const int volts = std::atoi(option.substr(0, 2).c_str());
-      if (volts >= 48 && volts <= 58) return Result::ok(format_int("PBDV%02u.0", static_cast<unsigned>(volts)),
-                                                        "Back to battery voltage (program 13)");
+    for (const auto &offered : redischarge_options(context.battery_voltage)) {
+      if (offered != "Full" && option == offered) {
+        return Result::ok(format("PBDV%04.1f", std::atof(option.c_str())), "Back to battery voltage (program 13)");
+      }
     }
-    return Result::refuse("must be Full or 48-58 V");
+    return Result::refuse("must be Full or one of the program 13 voltages for a " +
+                          std::to_string(context.battery_voltage) + " V bank");
   }
   if (key == "maximum_charging_current" || key == "maximum_mains_charging_current") {
     // Programs 02 / 11: inside the model envelope and, once announced, on the inverter's own list.
     const bool mains = key == "maximum_mains_charging_current";
     const auto amps = codec::parse_amps_option(option);
-    if (!amps.has_value() || !codec::charge_current_in_envelope(mains, *amps)) {
-      return Result::refuse(option + " is outside the model envelope");
+    const std::vector<int> *envelope = mains ? context.mains_charge_envelope : context.max_charge_envelope;
+    if (!amps.has_value() || !codec::charge_current_allowed(envelope, mains, *amps)) {
+      return Result::refuse(option + " is outside the configured options");
     }
     const std::vector<int> *allowed = mains ? context.allowed_mains_charge_a : context.allowed_max_charge_a;
     if (allowed != nullptr && !allowed->empty() && std::find(allowed->begin(), allowed->end(), *amps) == allowed->end()) {
@@ -175,38 +196,47 @@ Result encode_number(const std::string &key, float value, const Context &context
   // Independent settings: a fixed range, step and frame format.
   struct Plain {
     const char *key;
-    float min_value;
+    float min_value;  // 48 V bank; voltage settings scale with battery_voltage / 48
     float max_value;
     float step;  // 0: any value in range
     const char *pattern;
     bool integer;  // pattern takes an unsigned, else a double
+    bool volts;    // a battery voltage: scaled to the bank and refused on a bank mismatch
     const char *label;
   };
   static const Plain plain[] = {
-      {"battery_equalization_voltage", 48.0f, 60.0f, 0.0f, "PBEQV%05.2f", false, "Equalization voltage (program 31)"},
-      {"battery_equalization_interval", 0.0f, 90.0f, 1.0f, "PBEQP%03u", true, "Equalization interval (program 35)"},
-      {"battery_equalization_timeout", 5.0f, 900.0f, 5.0f, "PBEQOT%03u", true, "Equalization timeout (program 34)"},
-      {"battery_equalization_time", 5.0f, 900.0f, 5.0f, "PBEQT%03u", true, "Equalization time (program 33)"},
-      {"battery_cut_off_voltage", 40.0f, 52.0f, 0.0f, "PSDV%04.1f", false, "Low DC cut-off voltage (program 29)"},
-      {"battery_bulk_voltage", 48.0f, 58.4f, 0.0f, "PCVV%04.1f", false, "Bulk charging voltage (program 26)"},
-      {"battery_float_voltage", 48.0f, 58.4f, 0.0f, "PBFT%04.1f", false, "Float charging voltage (program 27)"},
-      {"battery_recharge_voltage", 44.0f, 51.0f, 1.0f, "PBCV%04.1f", false, "Back to utility voltage (program 12)"},
-      {"restore_second_output_delay_time", 0.0f, 60.0f, 5.0f, "PDDLYT%03u", true, "Dual recover delay (program 66)"},
+      {"battery_equalization_voltage", 48.0f, 60.0f, 0.0f, "PBEQV%05.2f", false, true, "Equalization voltage (program 31)"},
+      {"battery_equalization_interval", 0.0f, 90.0f, 1.0f, "PBEQP%03u", true, false, "Equalization interval (program 35)"},
+      {"battery_equalization_timeout", 5.0f, 900.0f, 5.0f, "PBEQOT%03u", true, false, "Equalization timeout (program 34)"},
+      {"battery_equalization_time", 5.0f, 900.0f, 5.0f, "PBEQT%03u", true, false, "Equalization time (program 33)"},
+      {"battery_cut_off_voltage", 40.0f, 52.0f, 0.0f, "PSDV%04.1f", false, true, "Low DC cut-off voltage (program 29)"},
+      {"battery_bulk_voltage", 48.0f, 58.4f, 0.0f, "PCVV%04.1f", false, true, "Bulk charging voltage (program 26)"},
+      {"battery_float_voltage", 48.0f, 58.4f, 0.0f, "PBFT%04.1f", false, true, "Float charging voltage (program 27)"},
+      {"battery_recharge_voltage", 44.0f, 51.0f, 1.0f, "PBCV%04.1f", false, true, "Back to utility voltage (program 12)"},
+      {"restore_second_output_delay_time", 0.0f, 60.0f, 5.0f, "PDDLYT%03u", true, false, "Dual recover delay (program 66)"},
       // Vendor formats; PSLV / PDSDV / PDSRV NAK with a lithium battery type (unsafe profile).
-      {"low_battery_alarm_voltage", 40.0f, 54.0f, 0.0f, "PSLV%04.1f", false, "Low battery alarm voltage (program 24)"},
-      {"second_output_cutoff_voltage", 40.0f, 54.0f, 0.0f, "PDSDV%04.1f", false, "Dual output cut-off voltage (program 61)"},
-      {"second_output_recovery_voltage", 44.0f, 58.0f, 0.0f, "PDSRV%04.1f", false, "Dual output recovery voltage (program 63)"},
+      {"low_battery_alarm_voltage", 40.0f, 54.0f, 0.0f, "PSLV%04.1f", false, true, "Low battery alarm voltage (program 24)"},
+      {"second_output_cutoff_voltage", 40.0f, 54.0f, 0.0f, "PDSDV%04.1f", false, true, "Dual output cut-off voltage (program 61)"},
+      {"second_output_recovery_voltage", 44.0f, 58.0f, 0.0f, "PDSRV%04.1f", false, true, "Dual output recovery voltage (program 63)"},
       // Program 65: 4 digits (PDDCGT000 got no reply at all, PDDCGT0000 was ACKed). 0 vs "Disable": unconfirmed.
-      {"second_output_discharge_time", 0.0f, 990.0f, 5.0f, "PDDCGT%04u", true, "Dual output discharge time (program 65)"},
+      {"second_output_discharge_time", 0.0f, 990.0f, 5.0f, "PDDCGT%04u", true, false, "Dual output discharge time (program 65)"},
       // Program 56: only 20 and 21 A have been sent; capped near the 26.9 A rating.
-      {"grid_connected_current", 0.0f, 30.0f, 1.0f, "PGFC%03u", true, "Grid-tie current (program 56)"},
-      {"inverter_restart_soc", 5.0f, 95.0f, 5.0f, "BMSSRC%03u", true, "Battery restart SOC (program 41)"},
+      {"grid_connected_current", 0.0f, 30.0f, 1.0f, "PGFC%03u", true, false, "Grid-tie current (program 56)"},
+      {"inverter_restart_soc", 5.0f, 95.0f, 5.0f, "BMSSRC%03u", true, false, "Battery restart SOC (program 41)"},
   };
   for (const auto &entry : plain) {
     if (key != entry.key) continue;
-    if (!on_grid(value, entry.min_value, entry.max_value, entry.step)) {
-      return Result::refuse(range_reason(entry.min_value, entry.max_value, entry.step));
+    float min_value = entry.min_value;
+    float max_value = entry.max_value;
+    float step = entry.step;
+    if (entry.volts) {
+      if (const auto why = bank_mismatch(context)) return Result::refuse(*why);
+      const float scale = static_cast<float>(context.battery_voltage) / 48.0f;
+      min_value *= scale;
+      max_value *= scale;
+      if (step > 0.0f) step = std::max(0.1f, step * scale);  // the frame format resolves 0.1 V
     }
+    if (!on_grid(value, min_value, max_value, step)) return Result::refuse(range_reason(min_value, max_value, step));
     return Result::ok(entry.integer ? format_int(entry.pattern, whole(value)) : format(entry.pattern, value), entry.label);
   }
 

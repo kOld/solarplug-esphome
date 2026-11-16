@@ -48,6 +48,42 @@ CONF_SELECTS = "selects"
 CONF_EXTENDED_SELECT_OPTIONS = "extended_select_options"
 CONF_TIME_ID = "time_id"
 CONF_RESPONSE_CRC = "response_crc"
+CONF_MACHINE_TYPE = "machine_type"
+CONF_BATTERY_VOLTAGE = "battery_voltage"
+CONF_CHARGING_CURRENT_OPTIONS = "charging_current_options"
+CONF_MAINS_CHARGING_CURRENT_OPTIONS = "mains_charging_current_options"
+
+# codec::MachineType values; "auto" reads QPRTL (see docs/protocol/COMPATIBILITY.md).
+MACHINE_TYPES = {"auto": -1, "UNKNOWN": 0, "A": 1, "B": 2, "C": 3, "D": 4, "F": 5}
+# Machine types A / C (HPVINV01 / 03): POP00 is utility first and there is no PEC or SOR (vendor tool tables).
+PRIORITY_OPTIONS_AC = {
+    "output_source_priority": ("Utility first (UTI)", "SUB priority", "SBU priority"),
+    "charger_priority": ("CSO", "SNU", "OSO"),
+}
+DEFAULT_CHARGING_CURRENTS = list(range(10, 81, 10))  # HPVINV02 QMCHGCR
+DEFAULT_MAINS_CHARGING_CURRENTS = [2] + list(range(10, 61, 10))  # HPVINV02 QMUCHGCR
+
+
+def redischarge_options(battery_voltage):
+    """Program 13 options: Full, then 48-58 V scaled to the bank. Mirrors writes::redischarge_options."""
+    options = ["Full"]
+    for volts in range(48, 59):
+        value = volts * battery_voltage / 48
+        options.append(f"{value:.0f} V" if abs(value - round(value)) < 0.01 else f"{value:.1f} V")
+    return options
+
+
+def scale_voltage_traits(min_value, max_value, step, battery_voltage):
+    """48 V ranges scaled to the bank; the frame format resolves 0.1 V. Mirrors writes::encode_number."""
+    scale = battery_voltage / 48
+    return round(min_value * scale, 2), round(max_value * scale, 2), max(0.1, round(step * scale, 2))
+
+
+def validate_current_list(value):
+    value = cv.ensure_list(cv.int_range(min=1, max=200))(value)
+    if len(value) < 2 or sorted(set(value)) != value:
+        raise cv.Invalid("charging current options must be at least 2 ascending, distinct values")
+    return value
 
 UNIT_KILOWATT = "kW"
 UNIT_KILOWATT_HOURS = "kWh"
@@ -176,6 +212,8 @@ TEXT_SENSOR_FIELDS = {
     "bms_status": ("HBMS1", "bms_flags_decoded", ENTITY_CATEGORY_DIAGNOSTIC),
     "qpiri_raw_payload": ("QPIRI", "raw_payload", ENTITY_CATEGORY_DIAGNOSTIC),
     "readback_cross_check": ("_CHECK", "readback_cross_check", ENTITY_CATEGORY_DIAGNOSTIC),
+    # Machine type used for the priority codes, e.g. "B (HPVINV02)".
+    "machine_type": ("_MODEL", "machine_type", ENTITY_CATEGORY_DIAGNOSTIC),
     "ac_output_mode": ("QPIRI", "ac_output_mode", ENTITY_CATEGORY_DIAGNOSTIC),
     "qflag_raw_payload": ("QFLAG", "raw_payload", ENTITY_CATEGORY_DIAGNOSTIC),
     "qbeqi_raw_payload": ("QBEQI", "raw_payload", ENTITY_CATEGORY_DIAGNOSTIC),
@@ -297,6 +335,7 @@ UNSAFE_WRITE_SELECTS = {"output_frequency", "output_voltage", "output_mode", "gr
 # `extended_select_options: true` on hardware where they are known to work.
 EXTENDED_SELECT_OPTIONS = {
     "charger_priority": ("SOR",),
+    # PEC: Easun SMT and types B / D / F. Machine types A / C use PRIORITY_OPTIONS_AC instead.
     "output_source_priority": ("PEC Mode (CT)",),
     "battery_type": ("AGM", "FLD", "USE", "TQF", "GRO", "LIB", "LIC", "FEL"),
 }
@@ -378,6 +417,11 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_EXTENDED_SELECT_OPTIONS, default=False): cv.boolean,
             # Keep the inverter in response-CRC mode so every H reply is CRC-checked (HPVINV02 fw 40.05).
             cv.Optional(CONF_RESPONSE_CRC, default=False): cv.boolean,
+            # Model profile for inverters other than the verified HPVINV02 48 V setup.
+            cv.Optional(CONF_MACHINE_TYPE, default="auto"): cv.one_of(*MACHINE_TYPES, upper=False),
+            cv.Optional(CONF_BATTERY_VOLTAGE, default=48): cv.one_of(24, 48, int=True),
+            cv.Optional(CONF_CHARGING_CURRENT_OPTIONS, default=DEFAULT_CHARGING_CURRENTS): validate_current_list,
+            cv.Optional(CONF_MAINS_CHARGING_CURRENT_OPTIONS, default=DEFAULT_MAINS_CHARGING_CURRENTS): validate_current_list,
             cv.Optional(CONF_TIME_ID): cv.use_id(time.RealTimeClock),
             cv.Optional(CONF_SENSORS): cv.Schema(
                 {cv.Optional(key): sensor_config_schema(field) for key, field in SENSOR_FIELDS.items()}
@@ -445,7 +489,9 @@ async def register_configured_switches(parent, config):
 
 async def register_configured_numbers(parent, config):
     for key, conf in config.get(CONF_NUMBERS, {}).items():
-        write_key, _, _, min_value, max_value, step = WRITE_NUMBERS[key]
+        write_key, unit, _, min_value, max_value, step = WRITE_NUMBERS[key]
+        if unit == UNIT_VOLT:
+            min_value, max_value, step = scale_voltage_traits(min_value, max_value, step, config[CONF_BATTERY_VOLTAGE])
         num = await number.new_number(conf, min_value=min_value, max_value=max_value, step=step)
         cg.add(num.set_parent(parent))
         cg.add(num.set_write_key(write_key))
@@ -454,9 +500,18 @@ async def register_configured_numbers(parent, config):
 
 async def register_configured_selects(parent, config):
     extended = config[CONF_EXTENDED_SELECT_OPTIONS]
+    type_ac = config[CONF_MACHINE_TYPE] in ("A", "C")
     for key, conf in config.get(CONF_SELECTS, {}).items():
         options = list(WRITE_SELECTS[key])
-        if extended:
+        if type_ac and key in PRIORITY_OPTIONS_AC:
+            options = list(PRIORITY_OPTIONS_AC[key])
+        if key == "maximum_charging_current":
+            options = [f"{a} A" for a in config[CONF_CHARGING_CURRENT_OPTIONS]]
+        elif key == "maximum_mains_charging_current":
+            options = [f"{a} A" for a in config[CONF_MAINS_CHARGING_CURRENT_OPTIONS]]
+        elif key == "battery_redischarge_voltage":
+            options = redischarge_options(config[CONF_BATTERY_VOLTAGE])
+        if extended and not (type_ac and key in PRIORITY_OPTIONS_AC):
             options += list(EXTENDED_SELECT_OPTIONS.get(key, ()))
         sel = cg.new_Pvariable(conf[CONF_ID])
         await select.register_select(sel, conf, options=options)
@@ -480,6 +535,9 @@ async def to_code(config):
     cg.add(var.set_settings_poll_interval_ms(config[CONF_SETTINGS_POLL_INTERVAL].total_milliseconds))
     cg.add(var.set_boot_poll_delay_ms(config[CONF_BOOT_POLL_DELAY].total_milliseconds))
     cg.add(var.set_response_crc(config[CONF_RESPONSE_CRC]))
+    cg.add(var.set_machine_type(MACHINE_TYPES[config[CONF_MACHINE_TYPE]]))
+    cg.add(var.set_battery_voltage(config[CONF_BATTERY_VOLTAGE]))
+    cg.add(var.set_charge_current_envelope(config[CONF_CHARGING_CURRENT_OPTIONS], config[CONF_MAINS_CHARGING_CURRENT_OPTIONS]))
     if CONF_TIME_ID in config:
         time_var = await cg.get_variable(config[CONF_TIME_ID])
         cg.add(var.set_time(time_var))

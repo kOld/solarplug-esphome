@@ -29,16 +29,45 @@ void SolarPlugComponent::load_charge_lists_() {
     return;  // first boot: the codegen defaults stay until two identical QM*CGCR replies
   }
   // Keep only values inside the model envelope; a list left empty counts as "not announced".
-  auto load = [](const uint8_t *values, uint8_t count, bool mains, std::vector<int> *out) {
+  auto envelope_ok = [this](bool mains, int amps) { return this->in_charge_envelope_(mains, amps); };
+  auto load = [&envelope_ok](const uint8_t *values, uint8_t count, bool mains, std::vector<int> *out) {
     out->clear();
     for (uint8_t i = 0; i < count; i++) {
-      if (charge_current_in_envelope(mains, values[i])) out->push_back(values[i]);
+      if (envelope_ok(mains, values[i])) out->push_back(values[i]);
     }
   };
   load(saved.max, saved.max_count, false, &this->allowed_max_charge_a_);
   load(saved.mains, saved.mains_count, true, &this->allowed_mains_charge_a_);
   this->apply_charge_options_(false);
   this->apply_charge_options_(true);
+}
+
+// The configured option lists are the envelope; without them, the HPVINV02 defaults.
+bool SolarPlugComponent::in_charge_envelope_(bool mains, int amps) const {
+  return codec::charge_current_allowed(mains ? &this->mains_charge_envelope_ : &this->max_charge_envelope_, mains, amps);
+}
+
+void SolarPlugComponent::note_machine_type_(const std::string &device_type) {
+  const codec::MachineType detected = codec::machine_type_from_qprtl(device_type);
+  const bool first_detection = !this->machine_type_detected_.has_value();
+  if (!this->machine_type_detected_.has_value() || *this->machine_type_detected_ != detected) {
+    this->machine_type_detected_ = detected;
+    ESP_LOGI(TAG, "machine type %s from QPRTL %s%s", codec::machine_type_name(detected), device_type.c_str(),
+             this->machine_type_config_.has_value() ? " (overridden in YAML)" : "");
+  }
+  std::string text;
+  if (this->machine_type_conflict_()) {
+    ESP_LOGW(TAG, "machine_type %s in YAML contradicts QPRTL %s (type %s); priority readback and writes are off",
+             codec::machine_type_name(*this->machine_type_config_), device_type.c_str(), codec::machine_type_name(detected));
+    text = std::string("conflict: YAML ") + codec::machine_type_name(*this->machine_type_config_) + ", QPRTL " + device_type;
+  } else {
+    const codec::MachineType effective = *this->machine_type_();
+    text = std::string(codec::machine_type_name(effective)) + " (" + device_type + ")";
+    if (this->machine_type_config_.has_value()) text += ", set in YAML";
+    if (effective == codec::MachineType::UNKNOWN) text += ", type B codes";
+  }
+  this->publish_text_("_MODEL", "machine_type", text);
+  if (first_detection) this->queue_command_group_("settings");  // seed the priorities now, not in 5 min
 }
 
 void SolarPlugComponent::save_charge_lists_() {
@@ -60,7 +89,7 @@ void SolarPlugComponent::apply_charge_options_(bool mains) {
   const char *key = mains ? "maximum_mains_charging_current" : "maximum_charging_current";
   std::vector<std::string> options;
   for (int amps : allowed) {
-    if (charge_current_in_envelope(mains, amps)) options.push_back(amps_option(amps));
+    if (this->in_charge_envelope_(mains, amps)) options.push_back(amps_option(amps));
   }
   if (options.empty()) return;  // nothing usable announced: keep the current options
   for (const auto &binding : this->write_selects_) {
@@ -426,6 +455,20 @@ void SolarPlugComponent::poll_due_groups_() {
     return;
   }
   if (this->boot_poll_sent_) this->queue_crc_keepalive_(now);
+  // Auto machine type: ask QPRTL every 20 s until it answers; after 5 unanswered tries fall back to UNKNOWN
+  // (type B codes, as earlier releases) and say so, so a silent QPRTL cannot disable priorities for good.
+  if (this->boot_poll_sent_ && !this->machine_type_config_.has_value() && !this->machine_type_detected_.has_value() &&
+      now - this->last_qprtl_attempt_ms_ >= 20000) {
+    this->last_qprtl_attempt_ms_ = now;
+    if (this->qprtl_attempts_ >= 5) {
+      ESP_LOGW(TAG, "QPRTL not answered after %u tries; using the type B priority codes (set machine_type to override)",
+               static_cast<unsigned>(this->qprtl_attempts_));
+      this->note_machine_type_("no QPRTL reply");
+    } else {
+      this->qprtl_attempts_++;
+      this->send_command("QPRTL");
+    }
+  }
   if (this->boot_poll_sent_ && this->fast_poll_interval_ms_ > 0 &&
       now - this->last_fast_poll_ms_ >= this->fast_poll_interval_ms_) {
     this->queue_command_group_("fast");
@@ -546,11 +589,19 @@ void SolarPlugComponent::apply_reading_(const codec::Reading &reading) {
 
 void SolarPlugComponent::publish_write_states_from_heep1_(const std::string &payload) {
   this->heep_values_.clear();
-  for (const auto &reading : codec::heep1_readback(split_tokens(payload))) {
+  for (const auto &reading : codec::heep1_readback(split_tokens(payload), this->machine_type_())) {
     if (reading.kind != codec::ReadingKind::NUMBER) this->heep_values_[reading.key] = reading.text;
-    const bool cross_check_only = reading.key == "output_source_priority" ||
+    // QPIRI is primary for output priority only where its codes are the verified type B ones.
+    const auto type = this->machine_type_();
+    const bool qpiri_has_priority = type.has_value() && codec::same_priority_codes(*type, codec::MachineType::B);
+    const bool cross_check_only = (reading.key == "output_source_priority" && qpiri_has_priority) ||
                                   reading.key == "ac_input_voltage_range" || reading.key == "overload_bypass";
     if (!cross_check_only) this->apply_reading_(reading);
+  }
+  if (!codec::normalize_heep1(split_tokens(payload)).has_value() && !this->heep1_layout_warned_) {
+    this->heep1_layout_warned_ = true;  // M3: say why settings stay unknown on a sibling model
+    ESP_LOGW(TAG, "HEEP1 has an unknown layout (%u tokens); settings readback is off. Please report a capture.",
+             static_cast<unsigned>(split_tokens(payload).size()));
   }
 }
 
@@ -577,7 +628,7 @@ void SolarPlugComponent::compare_with_heep1_(const codec::Reading &reading, cons
 void SolarPlugComponent::publish_write_states_from_qpiri_(const std::string &payload) {
   std::string mismatches;
   int compared = 0;
-  for (const auto &reading : codec::qpiri_readback(split_tokens(payload))) {
+  for (const auto &reading : codec::qpiri_readback(split_tokens(payload), this->machine_type_())) {
     if (reading.key == "output_source_priority" || reading.key == "ac_input_voltage_range") this->apply_reading_(reading);
     this->compare_with_heep1_(reading, "QPIRI", &mismatches, &compared);
   }
@@ -931,7 +982,19 @@ void SolarPlugComponent::apply_decoded_field_(const std::string &command, const 
   }
 
   if (command == "HBAT") {
-    if (field_name == "battery_series_count") assign_float(this->latest_.hbat_battery_series_count);
+    if (field_name == "battery_series_count") {
+      assign_float(this->latest_.hbat_battery_series_count);
+      if (this->latest_.hbat_battery_series_count.has_value()) {
+        const int volts = static_cast<int>(std::lround(*this->latest_.hbat_battery_series_count)) * 12;
+        if (volts != this->detected_battery_voltage_ && volts > 0 && volts <= 96) {
+          this->detected_battery_voltage_ = volts;
+          if (volts != this->battery_voltage_) {
+            ESP_LOGW(TAG, "inverter reports a %d V battery bank but battery_voltage is %d; voltage settings are refused",
+                     volts, this->battery_voltage_);
+          }
+        }
+      }
+    }
     else if (field_name == "battery_voltage_v") assign_float(this->latest_.hbat_battery_voltage_v);
     else if (field_name == "battery_capacity_percent") assign_float(this->latest_.hbat_battery_capacity_percent);
     else if (field_name == "battery_charging_current_a") assign_float(this->latest_.hbat_battery_charging_current_a);
@@ -1004,7 +1067,10 @@ void SolarPlugComponent::apply_decoded_field_(const std::string &command, const 
   }
 
   if (command == "QPRTL") {
-    if (field_name == "device_type") assign_text(this->latest_.qprtl_device_type);
+    if (field_name == "device_type") {
+      assign_text(this->latest_.qprtl_device_type);
+      this->note_machine_type_(value);
+    }
     return;
   }
 
@@ -1127,11 +1193,17 @@ void SolarPlugComponent::apply_decoded_field_(const std::string &command, const 
     }
     std::vector<int> &candidate = max_list ? this->candidate_max_charge_a_ : this->candidate_mains_charge_a_;
     std::vector<int> &list = max_list ? this->allowed_max_charge_a_ : this->allowed_mains_charge_a_;
-    if (candidate == parsed && list != parsed) {
-      list = parsed;
+    std::vector<int> usable;  // only what the configured envelope allows
+    for (int amps : parsed) {
+      if (this->in_charge_envelope_(!max_list, amps)) usable.push_back(amps);
+    }
+    if (candidate == parsed && list != usable && !usable.empty()) {
+      list = usable;
       ESP_LOGI(TAG, "%s allowed list set: %s", command.c_str(), value.c_str());
       this->apply_charge_options_(!max_list);
       this->save_charge_lists_();
+    } else if (candidate == parsed && usable.empty()) {
+      ESP_LOGW(TAG, "%s announces no value inside the configured options (%s); keeping them", command.c_str(), value.c_str());
     }
     candidate = parsed;
     this->publish_text_(command, field_name, value);
@@ -1299,6 +1371,10 @@ bool SolarPlugComponent::command_has_consumer_(const std::string &command) const
   if ((command == "QMCHGCR" || command == "QMUCHGCR") && !this->write_selects_.empty()) {  // charge-current options
     return true;
   }
+  // The machine type (QPRTL) decides the priority codes, and the bank size (HBAT[0]) gates every voltage
+  // setting, so any write entity needs both even when no sensor shows them.
+  const bool any_write = !this->write_selects_.empty() || !this->write_numbers_.empty() || !this->write_switches_.empty();
+  if ((command == "QPRTL" || command == "HBAT") && any_write) return true;
   if ((command == "QPIRI" || command == "QFLAG" || command == "QBEQI") &&
       (!this->write_selects_.empty() || !this->write_switches_.empty())) {
     return true;
@@ -1384,6 +1460,12 @@ writes::Context SolarPlugComponent::write_context_() const {
   context.allowed_max_charge_a = &this->allowed_max_charge_a_;
   context.allowed_mains_charge_a = &this->allowed_mains_charge_a_;
   context.writes_in_flight = this->writes_in_flight_();
+  context.machine_type = this->machine_type_();
+  context.machine_type_conflict = this->machine_type_conflict_();
+  context.battery_voltage = this->battery_voltage_;
+  context.detected_battery_voltage = this->detected_battery_voltage_;
+  context.max_charge_envelope = &this->max_charge_envelope_;
+  context.mains_charge_envelope = &this->mains_charge_envelope_;
   return context;
 }
 

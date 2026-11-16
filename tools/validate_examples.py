@@ -51,6 +51,12 @@ def main() -> int:
             unsafe = f"  solarplug_write_unsafe: !include {ROOT / 'packages' / 'solarplug-write-unsafe.yaml'}\n"
             cases["atom-s3-lite-write-beta+unsafe.yaml"] = re.sub(
                 r"(?m)^(  solarplug_write_beta: .*\n)", lambda m: m.group(1) + unsafe, beta, count=1)
+            # A non-HPVINV02 profile: 24 V bank, machine type F, Easun-style 120 A charge options.
+            profile = (
+                "\nsolarplug:\n  id: solarplug_reader\n  machine_type: F\n  battery_voltage: 24\n"
+                "  charging_current_options: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]\n"
+            )
+            cases["atom-s3-lite-write-beta+24v-profile.yaml"] = beta + profile
         for name, text in cases.items():
             target = work / name
             target.write_text(text, encoding="utf-8")

@@ -32,6 +32,7 @@ The separate beta profile (`packages/solarplug-write-beta.yaml`) exposes write c
   - `battery_redischarge_voltage` now offers `Full` and 48–58 V.
 
   An automation calling `number.set_value` on them needs `select.select_option` with an option such as `"30 A"`.
+- **Other models:** `machine_type`, `battery_voltage` (24 / 48) and the charge-current option lists adapt the priority codes, voltage ranges and current envelopes. HEEP1 readback also understands the GB3024 and LPVINV02 layouts ([COMPATIBILITY.md](docs/protocol/COMPATIBILITY.md#model-profile)).
 - **Integrity:** with `response_crc: true` (default in the full-reader package), every reply is CRC-checked: PI30 replies always, H replies through a `HOSTCRCEN` keep-alive. The Response CRC sensor shows the state.
 - **Diagnostics:** the `probe_read` / `probe_write` API actions send one allow-listed query (or `HOSTCRCEN`/`HOSTCRCDN`) and show the raw reply on Probe Result ([H_COMMANDS.md](docs/protocol/H_COMMANDS.md)).
 - **References:** see [docs/protocol/HEEP_SETTINGS_MAP.md](docs/protocol/HEEP_SETTINGS_MAP.md) and [docs/protocol/WRITE_SURFACE.md](docs/protocol/WRITE_SURFACE.md).

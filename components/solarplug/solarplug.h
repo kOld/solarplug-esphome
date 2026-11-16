@@ -102,6 +102,15 @@ class SolarPlugComponent : public Component, public uart::UARTDevice {
   void set_boot_poll_delay_ms(uint32_t value) { this->boot_poll_delay_ms_ = value; }
   // Keep the inverter in response-CRC mode (HOSTCRCEN every 30 s; the mode lapses ~64 s after each one).
   void set_response_crc(bool value) { this->response_crc_ = value; }
+  // Model profile. machine_type: -1 = auto (from QPRTL), else a codec::MachineType value.
+  void set_machine_type(int value) {
+    if (value >= 0) this->machine_type_config_ = static_cast<codec::MachineType>(value);
+  }
+  void set_battery_voltage(int volts) { this->battery_voltage_ = volts; }
+  void set_charge_current_envelope(const std::vector<int> &max_charge, const std::vector<int> &mains_charge) {
+    this->max_charge_envelope_ = max_charge;
+    this->mains_charge_envelope_ = mains_charge;
+  }
   void register_sensor(const std::string &command, const std::string &field, sensor::Sensor *sensor);
   void register_text_sensor(const std::string &command, const std::string &field, text_sensor::TextSensor *sensor);
   void register_write_switch(const std::string &key, SolarPlugWriteSwitch *sensor);
@@ -463,6 +472,29 @@ class SolarPlugComponent : public Component, public uart::UARTDevice {
   uint32_t resync_start_ms_{0};
   codec::ReplyLengthGuard reply_lengths_;
   codec::ResponseCrcTracker crc_mode_;  // whether H replies currently carry a CRC
+  // Model profile (see codec::MachineType and writes::Context).
+  std::optional<codec::MachineType> machine_type_config_;    // set in YAML, else auto
+  std::optional<codec::MachineType> machine_type_detected_;  // from QPRTL
+  // The type whose priority codes are used; nullopt while unknown, or when a YAML override contradicts the
+  // QPRTL-detected type (then priority readback and writes stop rather than use the wrong codes).
+  bool machine_type_conflict_() const {
+    return this->machine_type_config_.has_value() && this->machine_type_detected_.has_value() &&
+           *this->machine_type_detected_ != codec::MachineType::UNKNOWN &&
+           !codec::same_priority_codes(*this->machine_type_config_, *this->machine_type_detected_);
+  }
+  std::optional<codec::MachineType> machine_type_() const {
+    if (this->machine_type_conflict_()) return std::nullopt;
+    return this->machine_type_config_.has_value() ? this->machine_type_config_ : this->machine_type_detected_;
+  }
+  bool heep1_layout_warned_{false};
+  uint8_t qprtl_attempts_{0};            // QPRTL reads without a reply while the type is auto (M1)
+  uint32_t last_qprtl_attempt_ms_{0};
+  int battery_voltage_{48};
+  int detected_battery_voltage_{0};  // HBAT[0] x 12, 0 until read
+  std::vector<int> max_charge_envelope_;
+  std::vector<int> mains_charge_envelope_;
+  bool in_charge_envelope_(bool mains, int amps) const;
+  void note_machine_type_(const std::string &device_type);
   bool response_crc_{false};            // config: keep the inverter in response-CRC mode
   bool crc_keepalive_sent_{false};
   bool crc_keepalive_answered_{false};  // the first keep-alive finished (any status): state leaves Starting

@@ -88,6 +88,7 @@ solarplug:
     bms_status: { name: BMS Status, icon: mdi:battery-check-outline }
     battery_type: { name: Battery Type, icon: mdi:battery-sync }
     device_type: { name: Device Type, icon: mdi:identifier }
+    machine_type: { name: Machine Type, icon: mdi:chip }  # priority code table in use, e.g. B (HPVINV02)
     software_version: { name: Software Version, icon: mdi:tag-text }
     generation_date: { name: Generation Date, icon: mdi:calendar-today }
     generation_time: { name: Generation Time, icon: mdi:clock-outline }

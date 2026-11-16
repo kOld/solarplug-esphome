@@ -11,6 +11,7 @@
 #include "solarplug_writes.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <iostream>
@@ -263,6 +264,7 @@ int selftest() {
     ctx.reported = &reported;
     ctx.allowed_max_charge_a = &max_list;
     ctx.allowed_mains_charge_a = &mains_list;
+    ctx.detected_battery_voltage = 48;  // HBAT read: a 48 V bank
 
     // Switches: the bytes that used to be hard-coded with their CRC are the CRC of these commands.
     check(cmd(w::encode_switch("backlight", true)) == "PEx" && crc_hex("PEx") == "53 68", "switch backlight on (PExSh)");
@@ -349,6 +351,107 @@ int selftest() {
     check(refused(w::encode_number("nope", 1.0f, ctx)), "number unknown key refused");
   }
 
+  // ---- Model profiles ----
+  check(machine_type_from_qprtl("(HPVINV02") == MachineType::B && machine_type_from_qprtl("HPVINV05") == MachineType::B,
+        "machine type B");
+  check(machine_type_from_qprtl("HPVINV01") == MachineType::A && machine_type_from_qprtl("HPVINV03") == MachineType::C &&
+            machine_type_from_qprtl("HPVINV04") == MachineType::D && machine_type_from_qprtl("HPVINV08") == MachineType::F,
+        "machine types A C D F");
+  check(machine_type_from_qprtl("HPVINV06") == MachineType::UNKNOWN && machine_type_from_qprtl("") == MachineType::UNKNOWN,
+        "machine type unknown");
+  check(output_priority_code(MachineType::B, "SBU priority").value_or(-1) == 1 &&
+            output_priority_code(MachineType::A, "SBU priority").value_or(-1) == 2 &&
+            output_priority_code(MachineType::A, "Utility first (UTI)").value_or(-1) == 0 &&
+            !output_priority_code(MachineType::B, "Utility first (UTI)").has_value() &&
+            !output_priority_code(MachineType::A, "PEC Mode (CT)").has_value(),
+        "output priority codes per type");
+  check(charger_priority_code(MachineType::A, "OSO").value_or(-1) == 3 &&
+            charger_priority_code(MachineType::B, "OSO").value_or(-1) == 2 &&
+            !charger_priority_code(MachineType::A, "SOR").has_value() && output_priority_option(MachineType::A, 0) != nullptr &&
+            std::string(charger_priority_option(MachineType::C, 1)) == "CSO" && charger_priority_option(MachineType::A, 0) == nullptr,
+        "charger priority codes per type");
+  {
+    const std::string live = "(1 080 030 03311010230 012 1 1 0 0 1 020 025 040 050 056.4 056.4 042.0 020 0 0";
+    // Same settings in the generic GB3024 layout (extra [4]) and the LPVINV02 layout ([4] = d0-2 + buzzer).
+    const std::string gb3024 = "(1 080 030 03311010230 7 012 1 1 0 0 1 020 025 040 050 056.4 056.4 042.0 020 0 0";
+    const std::string lpv = "(1 080 030 03311010230 01201 1 0 0 1 020 025 040 050 056.4 056.4 042.0 020 0 0";
+    auto a = readback("HEEP1", live), b = readback("HEEP1", gb3024), c = readback("HEEP1", lpv);
+    check(a == b && a == c && a.size() > 20, "HEEP1 sibling layouts read the same settings");
+    check(readback("HEEP1", "(1 080 030 03311010230 012 1 1 0 0 1 020 025 040 050 056.4 056.4 042.0 020 0 0 9 9").empty(),
+          "HEEP1 unknown layout: no readback");
+    check(field("HEEP1", gb3024, "token_11") == "020" && field("HEEP1", gb3024, "battery_type") == "LIA",
+          "HEEP1 named fields from the normalized layout");
+    auto typed = settings_readback("HEEP1", live, MachineType::A);
+    bool priorities = false;
+    for (const auto &r : typed) priorities |= (r.key == "output_source_priority" && r.text == "SUB priority");
+    check(priorities, "type A reads HEEP1[0] = 1 as SUB");
+    auto unknown_type = settings_readback("HEEP1", live, std::nullopt);
+    bool any_priority = false;
+    for (const auto &r : unknown_type) any_priority |= r.key == "output_source_priority" || r.key == "charger_priority";
+    check(!any_priority && unknown_type.size() > 15, "type not known yet: priorities skipped, rest read");
+    bool qpiri_priority = false;
+    for (const auto &r : settings_readback("QPIRI", "(230.0 26.9 230.0 50.0 26.9 6200 6200 48.0 46.0 44.8 56.4 56.4 3 30 080 0 1 2 9 01 0 0 54.0 1 1",
+                                           MachineType::F)) {
+      qpiri_priority |= r.key == "output_source_priority";
+    }
+    check(!qpiri_priority, "QPIRI priorities only for type B codes");
+  }
+  {
+    namespace w = esphome::solarplug::writes;
+    auto cmd = [](const w::Result &r) { return r.frame.has_value() ? r.frame->command : "REFUSED: " + r.reason; };
+    w::Context a;
+    a.machine_type = MachineType::A;
+    check(cmd(w::encode_select("output_source_priority", "SBU priority", a)) == "POP02", "type A SBU is POP02");
+    check(cmd(w::encode_select("charger_priority", "OSO", a)) == "PCP03", "type A OSO is PCP03");
+    check(!w::encode_select("output_source_priority", "PEC Mode (CT)", a).frame.has_value(), "type A has no PEC");
+    w::Context unknown;
+    unknown.machine_type = std::nullopt;
+    check(!w::encode_select("charger_priority", "OSO", unknown).frame.has_value(), "priority refused until type known");
+    w::Context v24;
+    v24.battery_voltage = 24;
+    v24.detected_battery_voltage = 24;
+    check(cmd(w::encode_number("battery_recharge_voltage", 23.5f, v24)) == "PBCV23.5", "24 V recharge 0.5 V steps");
+    check(!w::encode_number("battery_recharge_voltage", 46.0f, v24).frame.has_value(), "24 V refuses 48 V values");
+    check(cmd(w::encode_number("battery_equalization_voltage", 29.2f, v24)) == "PBEQV29.20", "24 V equalization");
+    check(cmd(w::encode_select("battery_redischarge_voltage", "26.5 V", v24)) == "PBDV26.5", "24 V redischarge option");
+    check(w::redischarge_options(24).size() == 12 && w::redischarge_options(24)[1] == "24 V" &&
+              w::redischarge_options(24)[2] == "24.5 V" && w::redischarge_options(48)[11] == "58 V",
+          "redischarge options per bank");
+    w::Context mismatch;
+    mismatch.detected_battery_voltage = 24;
+    check(!w::encode_number("battery_recharge_voltage", 46.0f, mismatch).frame.has_value() &&
+              w::encode_number("grid_connected_current", 20.0f, mismatch).frame.has_value(),
+          "bank mismatch refuses voltage settings only");
+    w::Context unread_bank;  // HBAT not read yet
+    check(!w::encode_number("battery_recharge_voltage", 46.0f, unread_bank).frame.has_value() &&
+              !w::encode_select("battery_redischarge_voltage", "54 V", unread_bank).frame.has_value(),
+          "voltage settings fail closed until the bank is read");
+    w::Context conflict;
+    conflict.machine_type_conflict = true;
+    check(!w::encode_select("output_source_priority", "SBU priority", conflict).frame.has_value(),
+          "priority refused on a machine-type conflict");
+    // Every redischarge option round-trips: encode, then read the frame's value back as HEEP2[5].
+    for (int bank : {24, 48}) {
+      w::Context c;
+      c.battery_voltage = bank;
+      c.detected_battery_voltage = bank;
+      for (const auto &option : w::redischarge_options(bank)) {
+        const auto frame = w::encode_select("battery_redischarge_voltage", option, c);
+        bool ok = frame.frame.has_value();
+        if (ok) {
+          const std::string value = "0" + frame.frame->command.substr(4);  // PBDV24.5 -> 024.5
+          const std::string payload = "(0 044.0 020 044.0 046.0 " + value + " 0 058.4 060 120 030 0000 0000 10 0000 52.0 30000";
+          ok = readback("HEEP2", payload)["battery_redischarge_voltage"] == option;
+        }
+        check(ok, "redischarge option round-trips: " + option + " on " + std::to_string(bank) + " V");
+      }
+    }
+    std::vector<int> easun = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120};
+    w::Context wide;
+    wide.max_charge_envelope = &easun;
+    check(cmd(w::encode_select("maximum_charging_current", "120 A", wide)) == "MNCHGC120", "configured envelope (Easun 120 A)");
+  }
+
   // Minimum token gate used by the firmware before decoding.
   check(min_tokens_for("HEEP1") == 18 && min_tokens_for("QPIRI") == 18 && min_tokens_for("QBEQI") == 8, "min tokens");
 
@@ -385,7 +488,7 @@ int dump() {
 //   L<TAB>key<TAB>option         select (announced lists = this unit's QMCHGCR / QMUCHGCR)
 //   N<TAB>key<TAB>value[<TAB>k=v;k=v]   number, with the reported values the ordering rules read
 // prints OK<TAB>command or REFUSED<TAB>reason per line.
-int encode() {
+int encode(MachineType machine, int battery_voltage) {
   namespace w = esphome::solarplug::writes;
   const std::vector<int> max_list = {10, 20, 30, 40, 50, 60, 70, 80};
   const std::vector<int> mains_list = {2, 10, 20, 30, 40, 50, 60};
@@ -415,10 +518,19 @@ int encode() {
     ctx.reported = &reported;
     ctx.allowed_max_charge_a = &max_list;
     ctx.allowed_mains_charge_a = &mains_list;
+    ctx.machine_type = machine;
+    ctx.battery_voltage = battery_voltage;
+    ctx.detected_battery_voltage = battery_voltage;
     w::Result result = w::Result::refuse("bad request kind");
     if (parts[0] == "S") result = w::encode_switch(parts[1], parts[2] == "1");
     if (parts[0] == "L") result = w::encode_select(parts[1], parts[2], ctx);
     if (parts[0] == "N") result = w::encode_number(parts[1], std::strtof(parts[2].c_str(), nullptr), ctx);
+    if (parts[0] == "O") {  // O<TAB>redischarge<TAB>volts: the select options, joined by '|'
+      std::string joined;
+      for (const auto &option : w::redischarge_options(std::atoi(parts[2].c_str()))) joined += (joined.empty() ? "" : "|") + option;
+      std::printf("OK\t%s\n", joined.c_str());
+      continue;
+    }
     if (result.frame.has_value()) {
       std::printf("OK\t%s\n", result.frame->command.c_str());
     } else {
@@ -432,6 +544,15 @@ int encode() {
 
 int main(int argc, char **argv) {
   if (argc > 1 && std::strcmp(argv[1], "dump") == 0) return dump();
-  if (argc > 1 && std::strcmp(argv[1], "encode") == 0) return encode();
+  if (argc > 1 && std::strcmp(argv[1], "encode") == 0) {
+    // codec_harness encode [machine type A|B|C|D|F|UNKNOWN] [battery voltage]
+    MachineType machine = MachineType::B;
+    if (argc > 2) {
+      const std::string t = argv[2];
+      machine = t == "A" ? MachineType::A : t == "C" ? MachineType::C : t == "D" ? MachineType::D
+              : t == "F" ? MachineType::F : t == "UNKNOWN" ? MachineType::UNKNOWN : MachineType::B;
+    }
+    return encode(machine, argc > 3 ? std::atoi(argv[3]) : 48);
+  }
   return selftest();
 }

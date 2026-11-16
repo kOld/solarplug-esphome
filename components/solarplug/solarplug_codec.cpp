@@ -624,8 +624,17 @@ FieldList decode_heep(const std::vector<std::string> &tokens) {
 
 // QPIRI ratings/settings (25 fields on HPVINV02 fw 40.05, decode in docs/protocol QPIRI notes).
 // HEEP1 named settings that are read-only here (layout: docs/protocol/HEEP_SETTINGS_MAP.md).
-FieldList decode_heep1(const std::vector<std::string> &tokens) {
-  FieldList fields = decode_heep(tokens);  // raw_payload drives the write-entity readback
+FieldList decode_heep1(const std::vector<std::string> &raw) {
+  // Named fields and token_NN come from the HPVINV02 layout (normalize_heep1); raw_payload stays raw.
+  const auto normalized = normalize_heep1(raw);
+  FieldList fields;
+  if (!normalized.has_value()) {
+    if (!raw.empty()) fields.push_back({"raw_payload", join_tokens(raw, 0), "", "low"});
+    return fields;
+  }
+  const std::vector<std::string> &tokens = *normalized;
+  fields = decode_heep(tokens);
+  fields[0].value = join_tokens(raw, 0);  // raw_payload: the reply as received
   if (tokens.size() > 4 && tokens[3].size() == 11 && is_digits(tokens[3])) {
     const std::string &packed = tokens[3];
     const char *battery = battery_type_label(packed[2] - '0');
@@ -800,15 +809,13 @@ int code_of(const std::string &token) {
   if (token.empty() || !is_digits(token)) return -1;
   return std::atoi(token.c_str());
 }
-const char *const CHARGER_OPTIONS[] = {"CSO", "SNU", "OSO", "SOR"};
 // POPM00..04 / HEEP1[8] / QPIRI[21] (vendor labels).
 const char *const OUTPUT_MODE_OPTIONS[] = {"SIG", "PAL", "3P1", "3P2", "3P3"};
 // Program 13 readback ("054.0" / "00.0") as the select option: "Full" for 0, else "NN V".
 void add_redischarge(std::vector<Reading> &out, const std::string &token) {
   const auto volts = parse_optional_float(token);
   if (!volts.has_value() || *volts < 0.0f || *volts > 99.0f) return;
-  out.push_back(select_reading("battery_redischarge_voltage",
-                               *volts < 0.5f ? std::string("Full") : std::to_string(static_cast<int>(*volts + 0.5f)) + " V"));
+  out.push_back(select_reading("battery_redischarge_voltage", *volts < 0.05f ? std::string("Full") : volts_option(*volts)));
 }
 // HEEP2[11] / [12] as "SSEE" (start hour, end hour). Tentative: LCD experiment E1 decides the layout.
 void add_window(std::vector<Reading> &out, const char *start_key, const char *stop_key, const std::string &token) {
@@ -825,11 +832,14 @@ void add_window(std::vector<Reading> &out, const char *start_key, const char *st
 //   [5] buzzer; [6] backlight; [7] overload bypass; [9] BMS function; [10] BMS lock SOC;
 //   [11] SOC back to mains; [12] SOC back to battery; [13] restart SOC; [14] bulk; [15] float;
 //   [16] cut-off; [17] grid-connected current.
-std::vector<Reading> heep1_readback(const std::vector<std::string> &tokens) {
+std::vector<Reading> heep1_readback(const std::vector<std::string> &raw, std::optional<MachineType> machine) {
   std::vector<Reading> out;
-  if (!tokens.empty()) {
-    if (tokens[0] == "0") out.push_back(select_reading("output_source_priority", "SUB priority"));
-    if (tokens[0] == "1") out.push_back(select_reading("output_source_priority", "SBU priority"));
+  const auto normalized = normalize_heep1(raw);
+  if (!normalized.has_value()) return out;  // unknown layout: no readback rather than wrong slots
+  const std::vector<std::string> &tokens = *normalized;
+  if (machine.has_value() && tokens[0].size() == 1 && is_digits(tokens[0])) {
+    const char *option = output_priority_option(*machine, tokens[0][0] - '0');
+    if (option != nullptr) out.push_back(select_reading("output_source_priority", option));
   }
   if (tokens.size() > 1 && is_digits(tokens[1])) {
     out.push_back(select_reading("maximum_charging_current", amps_option(std::atoi(tokens[1].c_str()))));
@@ -860,8 +870,8 @@ std::vector<Reading> heep1_readback(const std::vector<std::string> &tokens) {
     if (tokens[4][0] == '0') out.push_back(select_reading("output_frequency", "50 Hz"));
     if (tokens[4][0] == '1') out.push_back(select_reading("output_frequency", "60 Hz"));
     add_flag(out, "display_return_homepage", digit_flag(tokens[4], 1));
-    const int charger = tokens[4][2] - '0';
-    if (charger >= 0 && charger <= 3) out.push_back(select_reading("charger_priority", CHARGER_OPTIONS[charger]));
+    const char *charger = machine.has_value() ? charger_priority_option(*machine, tokens[4][2] - '0') : nullptr;
+    if (charger != nullptr) out.push_back(select_reading("charger_priority", charger));
   }
   if (tokens.size() > 5) add_flag(out, "buzzer", digit_flag(tokens[5], 0));
   if (tokens.size() > 6) add_flag(out, "backlight", digit_flag(tokens[6], 0));
@@ -914,18 +924,20 @@ std::vector<Reading> heep2_readback(const std::vector<std::string> &tokens) {
 
 // QPIRI (25 fields here): [12] battery type (PBT enum), [15] AC input range, [16] output priority
 // (0 SUB, 1 SBU, 2 = SUF on sibling firmwares: not mapped, 3 PEC), [17] charger priority.
-std::vector<Reading> qpiri_readback(const std::vector<std::string> &tokens) {
+std::vector<Reading> qpiri_readback(const std::vector<std::string> &tokens, std::optional<MachineType> machine) {
   std::vector<Reading> out;
   if (tokens.size() < 18) return out;
+  const bool type_b_codes = machine.has_value() && (*machine == MachineType::B || *machine == MachineType::D ||
+                                                     *machine == MachineType::UNKNOWN);
   const int input_range = code_of(tokens[15]);
   if (input_range == 0) out.push_back(select_reading("ac_input_voltage_range", "Appliance"));
   if (input_range == 1) out.push_back(select_reading("ac_input_voltage_range", "UPS"));
-  const int output = code_of(tokens[16]);
-  if (output == 0) out.push_back(select_reading("output_source_priority", "SUB priority"));
-  if (output == 1) out.push_back(select_reading("output_source_priority", "SBU priority"));
-  if (output == 3) out.push_back(select_reading("output_source_priority", "PEC Mode (CT)"));
-  const int charger = code_of(tokens[17]);
-  if (charger >= 0 && charger <= 3) out.push_back(select_reading("charger_priority", CHARGER_OPTIONS[charger]));
+  if (type_b_codes) {
+    const char *output = output_priority_option(*machine, code_of(tokens[16]));
+    if (output != nullptr) out.push_back(select_reading("output_source_priority", output));
+    const char *charger = charger_priority_option(*machine, code_of(tokens[17]));
+    if (charger != nullptr) out.push_back(select_reading("charger_priority", charger));
+  }
   const char *battery = battery_type_label(code_of(tokens[12]));
   if (battery != nullptr) out.push_back(select_reading("battery_type", battery));
   // Cross-check only (HEEP1 is primary): [13] / [14] mains / maximum charging current, [2] output voltage,
@@ -1017,12 +1029,128 @@ bool crc_keepalive_due(bool sent_before, uint32_t ms_since_last, bool refresh_wa
   return refresh_wanted && ms_since_last >= CRC_MIN_REFRESH_SPACING_MS;
 }
 
+MachineType machine_type_from_qprtl(const std::string &device_type) {
+  std::string id = device_type;
+  if (!id.empty() && id[0] == '(') id.erase(0, 1);
+  if (id == "HPVINV01") return MachineType::A;
+  if (id == "HPVINV02" || id == "HPVINV05") return MachineType::B;
+  if (id == "HPVINV03") return MachineType::C;
+  if (id == "HPVINV04") return MachineType::D;
+  if (id == "HPVINV08") return MachineType::F;
+  return MachineType::UNKNOWN;
+}
+
+const char *machine_type_name(MachineType type) {
+  switch (type) {
+    case MachineType::A:
+      return "A";
+    case MachineType::B:
+      return "B";
+    case MachineType::C:
+      return "C";
+    case MachineType::D:
+      return "D";
+    case MachineType::F:
+      return "F";
+    case MachineType::UNKNOWN:
+      break;
+  }
+  return "unknown";
+}
+
+namespace {
+struct PriorityCode {
+  const char *option;
+  int code;
+};
+// Indexed by family: 0 = B/D/UNKNOWN, 1 = A/C, 2 = F.
+int priority_family(MachineType type) {
+  if (type == MachineType::A || type == MachineType::C) return 1;
+  if (type == MachineType::F) return 2;
+  return 0;
+}
+const std::vector<PriorityCode> &output_table(MachineType type) {
+  static const std::vector<PriorityCode> tables[3] = {
+      {{"SUB priority", 0}, {"SBU priority", 1}, {"PEC Mode (CT)", 3}},
+      {{"Utility first (UTI)", 0}, {"SUB priority", 1}, {"SBU priority", 2}},
+      {{"SUB priority", 0}, {"SBU priority", 1}, {"PEC Mode (CT)", 3}},
+  };
+  return tables[priority_family(type)];
+}
+const std::vector<PriorityCode> &charger_table(MachineType type) {
+  static const std::vector<PriorityCode> tables[3] = {
+      {{"CSO", 0}, {"SNU", 1}, {"OSO", 2}, {"SOR", 3}},
+      {{"CSO", 1}, {"SNU", 2}, {"OSO", 3}},
+      {{"CSO", 0}, {"SNU", 1}, {"OSO", 2}, {"SOR", 3}},
+  };
+  return tables[priority_family(type)];
+}
+std::optional<int> code_for(const std::vector<PriorityCode> &table, const std::string &option) {
+  for (const auto &entry : table) {
+    if (option == entry.option) return entry.code;
+  }
+  return std::nullopt;
+}
+const char *option_for(const std::vector<PriorityCode> &table, int code) {
+  for (const auto &entry : table) {
+    if (entry.code == code) return entry.option;
+  }
+  return nullptr;
+}
+}  // namespace
+
+bool same_priority_codes(MachineType a, MachineType b) { return priority_family(a) == priority_family(b); }
+
+std::optional<int> output_priority_code(MachineType type, const std::string &option) {
+  return code_for(output_table(type), option);
+}
+const char *output_priority_option(MachineType type, int code) { return option_for(output_table(type), code); }
+std::optional<int> charger_priority_code(MachineType type, const std::string &option) {
+  return code_for(charger_table(type), option);
+}
+const char *charger_priority_option(MachineType type, int code) { return option_for(charger_table(type), code); }
+
+std::optional<std::vector<std::string>> normalize_heep1(const std::vector<std::string> &tokens) {
+  auto shaped = [](const std::vector<std::string> &t) {
+    return t.size() == 20 && t[3].size() == 11 && is_digits(t[3]) && t[4].size() == 3 && is_digits(t[4]);
+  };
+  if (shaped(tokens)) return tokens;
+  if (tokens.size() == 21) {  // generic GB3024: drop the extra [4]
+    std::vector<std::string> out(tokens);
+    out.erase(out.begin() + 4);
+    if (shaped(out)) return out;
+  }
+  if (tokens.size() == 19 && tokens[4].size() == 5 && is_digits(tokens[4])) {  // LPVINV02
+    std::vector<std::string> out(tokens.begin(), tokens.begin() + 4);
+    out.push_back(tokens[4].substr(0, 3));  // frequency / display return / charger, as on HPVINV02
+    out.push_back(tokens[4].substr(4, 1));  // buzzer (d3 is the fault-log record)
+    out.insert(out.end(), tokens.begin() + 5, tokens.end());
+    if (shaped(out)) return out;
+  }
+  return std::nullopt;
+}
+
 bool charge_current_in_envelope(bool mains, int amps) {
   if (mains && amps == 2) return true;
   return amps >= 10 && amps <= (mains ? 60 : 80) && amps % 10 == 0;
 }
 
 std::string amps_option(int amps) { return std::to_string(amps) + " A"; }
+
+bool charge_current_allowed(const std::vector<int> *envelope, bool mains, int amps) {
+  if (envelope == nullptr || envelope->empty()) return charge_current_in_envelope(mains, amps);
+  return std::find(envelope->begin(), envelope->end(), amps) != envelope->end();
+}
+
+std::string volts_option(float volts) {
+  char buf[16];
+  if (std::fabs(volts - std::round(volts)) < 0.01f) {
+    std::snprintf(buf, sizeof(buf), "%d V", static_cast<int>(std::lround(volts)));
+  } else {
+    std::snprintf(buf, sizeof(buf), "%.1f V", volts);
+  }
+  return buf;
+}
 
 std::optional<int> parse_amps_option(const std::string &option) {
   if (option.size() < 3 || option.size() > 5 || option.compare(option.size() - 2, 2, " A") != 0) return std::nullopt;
@@ -1062,11 +1190,12 @@ ReplyClass classify_reply(const std::string &command, const std::string &payload
   return expects_ack ? ReplyClass::INVALID : ReplyClass::DATA;
 }
 
-std::vector<Reading> settings_readback(const std::string &command, const std::string &payload) {
+std::vector<Reading> settings_readback(const std::string &command, const std::string &payload,
+                                       std::optional<MachineType> machine) {
   const std::vector<std::string> tokens = split_tokens(payload);
-  if (command == "HEEP1") return heep1_readback(tokens);
+  if (command == "HEEP1") return heep1_readback(tokens, machine);
   if (command == "HEEP2") return heep2_readback(tokens);
-  if (command == "QPIRI") return qpiri_readback(tokens);
+  if (command == "QPIRI") return qpiri_readback(tokens, machine);
   if (command == "QFLAG") return qflag_readback(tokens);
   if (command == "QBEQI") return qbeqi_readback(tokens);
   return {};

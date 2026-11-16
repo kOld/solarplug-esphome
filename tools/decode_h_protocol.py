@@ -1823,11 +1823,32 @@ def _digit_flag(token: str, index: int) -> bool | None:
     return token[index] == "1"
 
 
+def normalize_heep1(tokens: list[str]) -> list[str] | None:
+    """Mirror of codec::normalize_heep1: map the GB3024 (21 tokens) and LPVINV02 (19 tokens) layouts onto HPVINV02."""
+    def shaped(t: list[str]) -> bool:
+        return len(t) == 20 and len(t[3]) == 11 and t[3].isdigit() and len(t[4]) == 3 and t[4].isdigit()
+    if shaped(tokens):
+        return tokens
+    if len(tokens) == 21:
+        out = tokens[:4] + tokens[5:]
+        if shaped(out):
+            return out
+    if len(tokens) == 19 and len(tokens[4]) == 5 and tokens[4].isdigit():
+        out = tokens[:4] + [tokens[4][:3], tokens[4][4]] + tokens[5:]
+        if shaped(out):
+            return out
+    return None
+
+
 def decode_heep1_settings(payload: str) -> dict[str, Any]:
     tokens = split_payload(payload)
     settings: dict[str, Any] = {}
     if len(tokens) < 18:  # mirrors min_tokens_for("HEEP1"): truncated frames are dropped before decode
         return settings
+    normalized = normalize_heep1(tokens)
+    if normalized is None:  # unknown layout: the firmware publishes no readback
+        return settings
+    tokens = normalized
     if len(tokens) > 3 and len(tokens[3]) == 11 and tokens[3].isdigit():
         packed = tokens[3]
         if packed[3] in "01":
